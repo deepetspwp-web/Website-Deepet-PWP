@@ -14,17 +14,13 @@ import {
     Check,
     Send,
     ExternalLink,
-    Trash2,
-    Calendar,
-    MapPin,
-    AlertCircle,
-    SlidersHorizontal,
-    CheckCircle2,
     Lock,
-    Unlock,
-    ShieldCheck,
-    Clock,
-    XCircle
+    KeyRound,
+    User,
+    LogOut,
+    CheckCircle2,
+    AlertCircle,
+    Settings as SettingsIcon,
 } from 'lucide-react';
 import { Lead, AdminSettings } from '@/lib/leadsStore';
 
@@ -92,8 +88,23 @@ function doPost(e) {
 }`;
 
 export default function AdminDashboardPage() {
-    // Navigation tabs: 'consultations' | 'contacts' | 'email' | 'sheets'
-    const [activeTab, setActiveTab] = useState<'consultations' | 'contacts' | 'email' | 'sheets'>('consultations');
+    // Auth state (Default credentials: 1 / 1)
+    const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+    const [authChecking, setAuthChecking] = useState<boolean>(true);
+    const [loginUser, setLoginUser] = useState('');
+    const [loginPass, setLoginPass] = useState('');
+    const [loginError, setLoginError] = useState('');
+    const [isLoggingIn, setIsLoggingIn] = useState(false);
+
+    // Password change state
+    const [currentPassword, setCurrentPassword] = useState('');
+    const [newUsername, setNewUsername] = useState('');
+    const [newPassword, setNewPassword] = useState('');
+    const [passwordChangeStatus, setPasswordChangeStatus] = useState<string | null>(null);
+    const [isChangingPassword, setIsChangingPassword] = useState(false);
+
+    // Navigation tabs: 'consultations' | 'contacts' | 'email' | 'sheets' | 'security'
+    const [activeTab, setActiveTab] = useState<'consultations' | 'contacts' | 'email' | 'sheets' | 'security'>('consultations');
 
     // Leads & filter state
     const [leads, setLeads] = useState<Lead[]>([]);
@@ -117,6 +128,8 @@ export default function AdminDashboardPage() {
         senderEmail: 'contact@deepetservices.com',
         enableEmailNotifications: true,
         googleScriptWebhookUrl: '',
+        adminUsername: '1',
+        adminPassword: '1',
     });
     const [settingsSaved, setSettingsSaved] = useState(false);
     const [isSavingSettings, setIsSavingSettings] = useState(false);
@@ -127,6 +140,58 @@ export default function AdminDashboardPage() {
     const [testWebhookStatus, setTestWebhookStatus] = useState<string | null>(null);
     const [isSendingTestWebhook, setIsSendingTestWebhook] = useState(false);
     const [copiedScript, setCopiedScript] = useState(false);
+
+    // Check existing session
+    useEffect(() => {
+        if (typeof window !== 'undefined') {
+            const loggedIn = sessionStorage.getItem('deepet_admin_auth');
+            if (loggedIn === 'true') {
+                setIsAuthenticated(true);
+            }
+            setAuthChecking(false);
+        }
+    }, []);
+
+    // Login Handler
+    const handleLogin = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setIsLoggingIn(true);
+        setLoginError('');
+
+        try {
+            const res = await fetch('/api/admin/auth', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'login',
+                    username: loginUser.trim(),
+                    password: loginPass.trim(),
+                }),
+            });
+            const data = await res.json();
+
+            if (data.success) {
+                setIsAuthenticated(true);
+                sessionStorage.setItem('deepet_admin_auth', 'true');
+                fetchLeads();
+                fetchSettings();
+            } else {
+                setLoginError(data.error || 'Incorrect username or password');
+            }
+        } catch {
+            setLoginError('Connection error. Please try again.');
+        } finally {
+            setIsLoggingIn(false);
+        }
+    };
+
+    // Logout Handler
+    const handleLogout = () => {
+        sessionStorage.removeItem('deepet_admin_auth');
+        setIsAuthenticated(false);
+        setLoginUser('');
+        setLoginPass('');
+    };
 
     // Fetch leads and stats
     const fetchLeads = async () => {
@@ -160,6 +225,7 @@ export default function AdminDashboardPage() {
             const data = await res.json();
             if (data.success && data.settings) {
                 setSettings(data.settings);
+                setNewUsername(data.settings.adminUsername || '1');
             }
         } catch (error) {
             console.error('Failed to fetch settings:', error);
@@ -167,23 +233,22 @@ export default function AdminDashboardPage() {
     };
 
     useEffect(() => {
-        fetchLeads();
-        fetchSettings();
-    }, []);
+        if (isAuthenticated) {
+            fetchLeads();
+            fetchSettings();
+        }
+    }, [isAuthenticated]);
 
-    // Filter leads based on current tab, status pill, and search
+    // Filter leads
     const filteredLeads = useMemo(() => {
         return leads.filter((lead) => {
-            // Tab filter: consultations vs contacts
             if (activeTab === 'consultations' && lead.type === 'contact') return false;
             if (activeTab === 'contacts' && lead.type === 'consultation') return false;
 
-            // Status filter
             if (statusFilter === 'active' && lead.status !== 'Pending') return false;
             if (statusFilter === 'completed' && lead.status !== 'Completed') return false;
             if (statusFilter === 'cancelled' && lead.status !== 'Cancelled') return false;
 
-            // Search filter
             if (searchQuery.trim()) {
                 const q = searchQuery.toLowerCase();
                 const matchCode = lead.code?.toLowerCase().includes(q);
@@ -198,46 +263,26 @@ export default function AdminDashboardPage() {
         });
     }, [leads, activeTab, statusFilter, searchQuery]);
 
-    // Update lead status
+    // Update status
     const handleStatusChange = async (leadId: string, newStatus: Lead['status']) => {
-        // Optimistic UI update
         setLeads((prev) =>
             prev.map((l) => (l.id === leadId ? { ...l, status: newStatus } : l))
         );
 
         try {
-            const res = await fetch('/api/admin/leads', {
+            await fetch('/api/admin/leads', {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ id: leadId, status: newStatus }),
             });
-            if (!res.ok) {
-                throw new Error('Failed to update status');
-            }
-            // Recalculate stats
             fetchLeads();
-        } catch (error) {
-            console.error(error);
-            alert('Failed to update status on server. Reverting...');
+        } catch {
+            alert('Failed to update status on server.');
             fetchLeads();
         }
     };
 
-    // Delete lead
-    const handleDeleteLead = async (leadId: string) => {
-        if (!confirm(`Are you sure you want to delete lead ${leadId}?`)) return;
-
-        setLeads((prev) => prev.filter((l) => l.id !== leadId));
-        try {
-            await fetch(`/api/admin/leads?id=${leadId}`, { method: 'DELETE' });
-            fetchLeads();
-        } catch (error) {
-            console.error('Delete error:', error);
-            fetchLeads();
-        }
-    };
-
-    // Save Email Settings
+    // Save Settings
     const handleSaveSettings = async (e: React.FormEvent) => {
         e.preventDefault();
         setIsSavingSettings(true);
@@ -260,6 +305,40 @@ export default function AdminDashboardPage() {
         }
     };
 
+    // Change Password Handler
+    const handleChangeCredentials = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setIsChangingPassword(true);
+        setPasswordChangeStatus(null);
+
+        try {
+            const res = await fetch('/api/admin/auth', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'change_credentials',
+                    currentPassword: currentPassword.trim(),
+                    newUsername: newUsername.trim(),
+                    newPassword: newPassword.trim(),
+                }),
+            });
+            const data = await res.json();
+
+            if (data.success) {
+                setPasswordChangeStatus('Success: Credentials updated successfully!');
+                setCurrentPassword('');
+                setNewPassword('');
+                fetchSettings();
+            } else {
+                setPasswordChangeStatus(`Error: ${data.error}`);
+            }
+        } catch {
+            setPasswordChangeStatus('Network error while updating credentials.');
+        } finally {
+            setIsChangingPassword(false);
+        }
+    };
+
     // Send Test Email
     const handleSendTestEmail = async () => {
         setIsSendingTestEmail(true);
@@ -268,7 +347,7 @@ export default function AdminDashboardPage() {
             const res = await fetch('/api/admin/test-email', { method: 'POST' });
             const data = await res.json();
             setTestEmailStatus(data.message || data.error || 'Test email completed');
-        } catch (err) {
+        } catch {
             setTestEmailStatus('Failed to send test email');
         } finally {
             setIsSendingTestEmail(false);
@@ -287,11 +366,11 @@ export default function AdminDashboardPage() {
             });
             const data = await res.json();
             if (data.success) {
-                setTestWebhookStatus('Success: Test row added to your Google Sheet!');
+                setTestWebhookStatus('Success: Test lead sent to your Google Sheet!');
             } else {
                 setTestWebhookStatus(`Error: ${data.error}`);
             }
-        } catch (err) {
+        } catch {
             setTestWebhookStatus('Network error while testing webhook');
         } finally {
             setIsSendingTestWebhook(false);
@@ -301,7 +380,7 @@ export default function AdminDashboardPage() {
     // Export CSV
     const exportCSV = () => {
         if (!leads.length) {
-            alert('No leads to export');
+            alert('No leads to export.');
             return;
         }
 
@@ -352,7 +431,7 @@ export default function AdminDashboardPage() {
         document.body.removeChild(link);
     };
 
-    // Copy Google Apps Script code
+    // Copy Apps Script
     const copyAppsScript = () => {
         if (navigator.clipboard) {
             navigator.clipboard.writeText(APPS_SCRIPT_CODE);
@@ -361,39 +440,122 @@ export default function AdminDashboardPage() {
         }
     };
 
-    return (
-        <div className="min-h-screen bg-[#f4f7fb] text-slate-800 font-sans pb-16">
-            {/* Top Navigation Bar */}
-            <header className="bg-white border-b border-slate-200 sticky top-0 z-40 shadow-xs">
-                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                    <div className="flex items-center justify-between h-16">
-                        {/* Brand */}
-                        <div className="flex items-center gap-3">
-                            <div className="w-9 h-9 rounded-xl bg-[#003451] flex items-center justify-center text-white font-bold text-lg shadow-sm">
-                                🐾
-                            </div>
-                            <div>
-                                <div className="flex items-center gap-2">
-                                    <span className="font-serif font-bold text-lg text-[#003451] tracking-tight">
-                                        DeePets
-                                    </span>
-                                    <span className="px-2 py-0.5 rounded-md bg-[#bfe37f]/30 text-[#003451] text-[10px] font-bold uppercase tracking-wider">
-                                        Admin
-                                    </span>
-                                </div>
-                                <p className="text-[11px] text-slate-400 font-medium">Lead Management &amp; Settings</p>
+    // 1. Loading Splash
+    if (authChecking) {
+        return (
+            <div className="min-h-screen bg-slate-50 flex items-center justify-center font-sans">
+                <div className="text-slate-400 text-sm font-medium flex items-center gap-2">
+                    <RefreshCw className="w-4 h-4 animate-spin text-slate-500" />
+                    <span>Loading DeePets Admin...</span>
+                </div>
+            </div>
+        );
+    }
+
+    // 2. Simple, Clean Login Screen (Credentials: 1 / 1)
+    if (!isAuthenticated) {
+        return (
+            <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4 font-sans antialiased text-slate-800">
+                <div className="w-full max-w-sm bg-white rounded-xl shadow-sm border border-slate-200 p-8">
+                    <div className="text-center mb-6">
+                        <div className="w-12 h-12 bg-slate-900 text-white rounded-lg flex items-center justify-center mx-auto mb-3 font-bold text-xl shadow-xs">
+                            🐾
+                        </div>
+                        <h1 className="text-xl font-bold text-slate-900 tracking-tight">
+                            DeePets Admin
+                        </h1>
+                        <p className="text-xs text-slate-500 mt-1">
+                            Sign in to access leads and settings
+                        </p>
+                    </div>
+
+                    {loginError && (
+                        <div className="mb-4 p-3 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs font-medium flex items-center gap-2">
+                            <AlertCircle className="w-4 h-4 shrink-0" />
+                            <span>{loginError}</span>
+                        </div>
+                    )}
+
+                    <form onSubmit={handleLogin} className="space-y-4">
+                        <div>
+                            <label className="block text-xs font-semibold text-slate-700 mb-1">
+                                Username
+                            </label>
+                            <div className="relative">
+                                <User className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                                <input
+                                    type="text"
+                                    required
+                                    value={loginUser}
+                                    onChange={(e) => setLoginUser(e.target.value)}
+                                    placeholder="Enter username (default: 1)"
+                                    className="w-full pl-9 pr-3 py-2 text-sm bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent transition-all"
+                                />
                             </div>
                         </div>
 
-                        {/* Navigation Tabs */}
-                        <nav className="hidden md:flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200/80">
+                        <div>
+                            <label className="block text-xs font-semibold text-slate-700 mb-1">
+                                Password
+                            </label>
+                            <div className="relative">
+                                <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                                <input
+                                    type="password"
+                                    required
+                                    value={loginPass}
+                                    onChange={(e) => setLoginPass(e.target.value)}
+                                    placeholder="Enter password (default: 1)"
+                                    className="w-full pl-9 pr-3 py-2 text-sm bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent transition-all"
+                                />
+                            </div>
+                        </div>
+
+                        <button
+                            type="submit"
+                            disabled={isLoggingIn}
+                            className="w-full py-2.5 px-4 bg-slate-900 hover:bg-slate-800 text-white text-sm font-semibold rounded-lg shadow-xs transition-all cursor-pointer active:scale-[0.99] disabled:bg-slate-400"
+                        >
+                            {isLoggingIn ? 'Signing in...' : 'Sign In'}
+                        </button>
+                    </form>
+
+                    <div className="mt-6 pt-4 border-t border-slate-100 text-center">
+                        <p className="text-[11px] text-slate-400">
+                            Default ID: <code className="bg-slate-100 px-1.5 py-0.5 rounded font-mono text-slate-600">1</code> / Password: <code className="bg-slate-100 px-1.5 py-0.5 rounded font-mono text-slate-600">1</code>
+                        </p>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    // 3. Main Clean Admin Dashboard
+    return (
+        <div className="min-h-screen bg-slate-50 text-slate-900 font-sans antialiased text-sm">
+            {/* Clean Top Navigation Bar */}
+            <header className="bg-white border-b border-slate-200 sticky top-0 z-40">
+                <div className="max-w-7xl mx-auto px-4 sm:px-6">
+                    <div className="flex items-center justify-between h-14">
+                        {/* Brand */}
+                        <div className="flex items-center gap-2.5">
+                            <span className="font-bold text-base text-slate-900 tracking-tight">
+                                DeePets
+                            </span>
+                            <span className="text-[11px] font-semibold text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
+                                Admin
+                            </span>
+                        </div>
+
+                        {/* Minimalist Tabs */}
+                        <nav className="hidden md:flex items-center gap-1">
                             <button
                                 type="button"
                                 onClick={() => setActiveTab('consultations')}
-                                className={`px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer ${
                                     activeTab === 'consultations'
-                                        ? 'bg-white text-[#003451] shadow-xs'
-                                        : 'text-slate-600 hover:text-slate-900'
+                                        ? 'bg-slate-900 text-white'
+                                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
                                 }`}
                             >
                                 Consultations ({stats.consultations})
@@ -401,21 +563,21 @@ export default function AdminDashboardPage() {
                             <button
                                 type="button"
                                 onClick={() => setActiveTab('contacts')}
-                                className={`px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer ${
                                     activeTab === 'contacts'
-                                        ? 'bg-white text-[#003451] shadow-xs'
-                                        : 'text-slate-600 hover:text-slate-900'
+                                        ? 'bg-slate-900 text-white'
+                                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
                                 }`}
                             >
-                                Contact Enquiries ({stats.contacts})
+                                Contacts ({stats.contacts})
                             </button>
                             <button
                                 type="button"
                                 onClick={() => setActiveTab('email')}
-                                className={`px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer ${
                                     activeTab === 'email'
-                                        ? 'bg-white text-[#003451] shadow-xs'
-                                        : 'text-slate-600 hover:text-slate-900'
+                                        ? 'bg-slate-900 text-white'
+                                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
                                 }`}
                             >
                                 Email Settings
@@ -423,45 +585,66 @@ export default function AdminDashboardPage() {
                             <button
                                 type="button"
                                 onClick={() => setActiveTab('sheets')}
-                                className={`px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer ${
                                     activeTab === 'sheets'
-                                        ? 'bg-white text-[#003451] shadow-xs'
-                                        : 'text-slate-600 hover:text-slate-900'
+                                        ? 'bg-slate-900 text-white'
+                                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
                                 }`}
                             >
                                 Google Sheet
                             </button>
+                            <button
+                                type="button"
+                                onClick={() => setActiveTab('security')}
+                                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer ${
+                                    activeTab === 'security'
+                                        ? 'bg-slate-900 text-white'
+                                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                                }`}
+                            >
+                                Change Password
+                            </button>
                         </nav>
 
-                        {/* Right Quick Links */}
-                        <div className="flex items-center gap-3">
+                        {/* Right Quick Actions */}
+                        <div className="flex items-center gap-2">
                             <Link
                                 href="/"
                                 target="_blank"
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition-all"
+                                className="inline-flex items-center gap-1 px-2.5 py-1 text-xs text-slate-600 hover:text-slate-900 rounded border border-slate-200 hover:bg-slate-50 transition-colors"
                             >
-                                <span>Live Site</span>
-                                <ExternalLink className="w-3.5 h-3.5" />
+                                <span>Website</span>
+                                <ExternalLink className="w-3 h-3" />
                             </Link>
+
+                            <button
+                                type="button"
+                                onClick={handleLogout}
+                                title="Sign Out"
+                                className="inline-flex items-center gap-1 px-2.5 py-1 text-xs text-rose-600 hover:text-rose-700 rounded border border-rose-200 hover:bg-rose-50 transition-colors cursor-pointer"
+                            >
+                                <LogOut className="w-3 h-3" />
+                                <span className="hidden sm:inline">Sign Out</span>
+                            </button>
                         </div>
                     </div>
 
-                    {/* Mobile Tabs */}
-                    <div className="flex md:hidden overflow-x-auto py-2 gap-2 border-t border-slate-100 scrollbar-none">
+                    {/* Mobile Horizontal Tabs */}
+                    <div className="flex md:hidden overflow-x-auto py-2 gap-1.5 border-t border-slate-100 scrollbar-none">
                         <button
                             type="button"
                             onClick={() => setActiveTab('consultations')}
-                            className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap ${
-                                activeTab === 'consultations' ? 'bg-[#003451] text-white' : 'bg-slate-100 text-slate-600'
+                            className={`px-2.5 py-1 rounded text-xs font-medium whitespace-nowrap ${
+                                activeTab === 'consultations' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600'
                             }`}
                         >
-                            Consultations
+                            Consultations ({stats.consultations})
                         </button>
                         <button
                             type="button"
                             onClick={() => setActiveTab('contacts')}
-                            className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap ${
-                                activeTab === 'contacts' ? 'bg-[#003451] text-white' : 'bg-slate-100 text-slate-600'
+                            className={`px-2.5 py-1 rounded text-xs font-medium whitespace-nowrap ${
+                                activeTab === 'contacts' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600'
                             }`}
                         >
                             Contacts
@@ -469,8 +652,8 @@ export default function AdminDashboardPage() {
                         <button
                             type="button"
                             onClick={() => setActiveTab('email')}
-                            className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap ${
-                                activeTab === 'email' ? 'bg-[#003451] text-white' : 'bg-slate-100 text-slate-600'
+                            className={`px-2.5 py-1 rounded text-xs font-medium whitespace-nowrap ${
+                                activeTab === 'email' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600'
                             }`}
                         >
                             Email
@@ -478,127 +661,122 @@ export default function AdminDashboardPage() {
                         <button
                             type="button"
                             onClick={() => setActiveTab('sheets')}
-                            className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap ${
-                                activeTab === 'sheets' ? 'bg-[#003451] text-white' : 'bg-slate-100 text-slate-600'
+                            className={`px-2.5 py-1 rounded text-xs font-medium whitespace-nowrap ${
+                                activeTab === 'sheets' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600'
                             }`}
                         >
                             Google Sheet
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setActiveTab('security')}
+                            className={`px-2.5 py-1 rounded text-xs font-medium whitespace-nowrap ${
+                                activeTab === 'security' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600'
+                            }`}
+                        >
+                            Password
                         </button>
                     </div>
                 </div>
             </header>
 
-            {/* Main Content Area */}
-            <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8">
+            {/* Dashboard Content Container */}
+            <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6">
 
                 {/* =========================================================================
-                    TAB 1 & 2: CONSULTATIONS & CONTACT LEADS (REFERENCE IMAGE 3)
+                    TAB 1 & 2: LEADS TABLE (1-LINE CLEAN LAYOUT, NO DELETE BUTTON)
                    ========================================================================= */}
                 {(activeTab === 'consultations' || activeTab === 'contacts') && (
-                    <div className="space-y-6">
-                        {/* Section Header */}
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div className="space-y-4">
+                        {/* Header Bar */}
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                             <div>
-                                <h1 className="text-2xl sm:text-3xl font-extrabold text-[#003451] tracking-tight">
-                                    {activeTab === 'consultations'
-                                        ? 'Consultation Requests & Leads'
-                                        : 'Contact Form Enquiries'}
+                                <h1 className="text-xl font-bold text-slate-900">
+                                    {activeTab === 'consultations' ? 'Consultation Bookings' : 'Contact Inquiries'}
                                 </h1>
-                                <p className="text-slate-500 text-xs sm:text-sm mt-1">
+                                <p className="text-xs text-slate-500 mt-0.5">
                                     {activeTab === 'consultations'
-                                        ? 'All pet parent consultation inquiries, callback requests, and bookings from the hero and service forms.'
-                                        : 'All general questions and customer inquiries submitted through contact forms across the website.'}
+                                        ? 'Incoming leads captured from the homepage hero and service forms in real-time.'
+                                        : 'Customer questions submitted via contact and footer forms.'}
                                 </p>
                             </div>
 
-                            {/* Top Right Action Buttons */}
-                            <div className="flex items-center gap-2.5">
+                            <div className="flex items-center gap-2">
                                 <button
                                     type="button"
                                     onClick={fetchLeads}
                                     disabled={isRefreshing}
-                                    className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#95c93d] hover:bg-[#86b834] text-[#003451] font-bold text-xs sm:text-sm shadow-sm transition-all cursor-pointer active:scale-95"
+                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 text-xs font-semibold shadow-2xs transition-colors cursor-pointer"
                                 >
-                                    <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
-                                    <span>Sync DB</span>
+                                    <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin text-slate-500' : ''}`} />
+                                    <span>Refresh</span>
                                 </button>
                                 <button
                                     type="button"
                                     onClick={exportCSV}
-                                    className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 font-bold text-xs sm:text-sm shadow-sm transition-all cursor-pointer active:scale-95"
+                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold shadow-2xs transition-colors cursor-pointer"
                                 >
-                                    <Download className="w-4 h-4 text-slate-600" />
+                                    <Download className="w-3.5 h-3.5" />
                                     <span>Export CSV</span>
                                 </button>
                             </div>
                         </div>
 
-                        {/* 4 Metrics Summary Cards */}
-                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                            {/* Total Card */}
-                            <div className="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-xs">
-                                <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">
-                                    {activeTab === 'consultations' ? 'Total Consultations' : 'Total Enquiries'}
-                                </span>
-                                <p className="text-3xl font-extrabold text-[#003451] mt-2 tracking-tight">
+                        {/* 4 Stats Cards */}
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                            <div className="bg-white p-4 rounded-lg border border-slate-200">
+                                <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+                                    Total
+                                </div>
+                                <div className="text-2xl font-bold text-slate-900 mt-1">
                                     {activeTab === 'consultations' ? stats.consultations : stats.contacts}
-                                </p>
+                                </div>
                             </div>
-
-                            {/* Active / Pending Card */}
-                            <div className="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-xs">
-                                <span className="text-xs font-bold text-amber-600 uppercase tracking-wider">
+                            <div className="bg-white p-4 rounded-lg border border-slate-200">
+                                <div className="text-[11px] font-semibold text-amber-600 uppercase tracking-wider">
                                     Active / Pending
-                                </span>
-                                <p className="text-3xl font-extrabold text-[#f97316] mt-2 tracking-tight">
+                                </div>
+                                <div className="text-2xl font-bold text-amber-600 mt-1">
                                     {leads.filter(l => (activeTab === 'consultations' ? l.type === 'consultation' : l.type === 'contact') && l.status === 'Pending').length}
-                                </p>
+                                </div>
                             </div>
-
-                            {/* Completed Card */}
-                            <div className="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-xs">
-                                <span className="text-xs font-bold text-emerald-600 uppercase tracking-wider">
+                            <div className="bg-white p-4 rounded-lg border border-slate-200">
+                                <div className="text-[11px] font-semibold text-emerald-600 uppercase tracking-wider">
                                     Completed
-                                </span>
-                                <p className="text-3xl font-extrabold text-[#10b981] mt-2 tracking-tight">
+                                </div>
+                                <div className="text-2xl font-bold text-emerald-600 mt-1">
                                     {leads.filter(l => (activeTab === 'consultations' ? l.type === 'consultation' : l.type === 'contact') && l.status === 'Completed').length}
-                                </p>
+                                </div>
                             </div>
-
-                            {/* Cancelled Card */}
-                            <div className="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-xs">
-                                <span className="text-xs font-bold text-rose-600 uppercase tracking-wider">
+                            <div className="bg-white p-4 rounded-lg border border-slate-200">
+                                <div className="text-[11px] font-semibold text-rose-600 uppercase tracking-wider">
                                     Cancelled
-                                </span>
-                                <p className="text-3xl font-extrabold text-[#ef4444] mt-2 tracking-tight">
+                                </div>
+                                <div className="text-2xl font-bold text-rose-600 mt-1">
                                     {leads.filter(l => (activeTab === 'consultations' ? l.type === 'consultation' : l.type === 'contact') && l.status === 'Cancelled').length}
-                                </p>
+                                </div>
                             </div>
                         </div>
 
-                        {/* Search and Filter Row */}
-                        <div className="bg-white rounded-2xl p-3 sm:p-4 border border-slate-200/80 shadow-xs flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
-                            {/* Search Input */}
-                            <div className="relative flex-1">
-                                <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                        {/* Search & Filter Toolbar */}
+                        <div className="bg-white p-3 rounded-lg border border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-2.5">
+                            <div className="relative w-full sm:w-80">
+                                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                                 <input
                                     type="text"
                                     value={searchQuery}
                                     onChange={(e) => setSearchQuery(e.target.value)}
                                     placeholder="Search name, phone, code..."
-                                    className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-xs sm:text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#95c93d]/50 focus:bg-white transition-all"
+                                    className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-slate-900 focus:bg-white"
                                 />
                             </div>
 
-                            {/* Filter Pills */}
-                            <div className="flex items-center gap-1.5 self-start md:self-auto overflow-x-auto w-full md:w-auto">
+                            <div className="flex items-center gap-1 w-full sm:w-auto">
                                 <button
                                     type="button"
                                     onClick={() => setStatusFilter('all')}
-                                    className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                                        statusFilter === 'all'
-                                            ? 'bg-[#95c93d] text-[#003451] shadow-xs'
-                                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                                    className={`px-2.5 py-1 rounded text-xs font-semibold cursor-pointer ${
+                                        statusFilter === 'all' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                                     }`}
                                 >
                                     All
@@ -606,10 +784,8 @@ export default function AdminDashboardPage() {
                                 <button
                                     type="button"
                                     onClick={() => setStatusFilter('active')}
-                                    className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                                        statusFilter === 'active'
-                                            ? 'bg-[#003451] text-white shadow-xs'
-                                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                                    className={`px-2.5 py-1 rounded text-xs font-semibold cursor-pointer ${
+                                        statusFilter === 'active' ? 'bg-amber-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                                     }`}
                                 >
                                     Active
@@ -617,10 +793,8 @@ export default function AdminDashboardPage() {
                                 <button
                                     type="button"
                                     onClick={() => setStatusFilter('completed')}
-                                    className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                                        statusFilter === 'completed'
-                                            ? 'bg-[#003451] text-white shadow-xs'
-                                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                                    className={`px-2.5 py-1 rounded text-xs font-semibold cursor-pointer ${
+                                        statusFilter === 'completed' ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                                     }`}
                                 >
                                     Completed
@@ -628,10 +802,8 @@ export default function AdminDashboardPage() {
                                 <button
                                     type="button"
                                     onClick={() => setStatusFilter('cancelled')}
-                                    className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                                        statusFilter === 'cancelled'
-                                            ? 'bg-[#003451] text-white shadow-xs'
-                                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                                    className={`px-2.5 py-1 rounded text-xs font-semibold cursor-pointer ${
+                                        statusFilter === 'cancelled' ? 'bg-rose-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                                     }`}
                                 >
                                     Cancelled
@@ -639,107 +811,105 @@ export default function AdminDashboardPage() {
                             </div>
                         </div>
 
-                        {/* Leads Data Table (Reference Image 3) */}
-                        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
+                        {/* All-in-one-line Leads Table */}
+                        <div className="bg-white rounded-lg border border-slate-200 overflow-hidden shadow-2xs">
                             <div className="overflow-x-auto">
-                                <table className="w-full text-left text-xs sm:text-sm">
-                                    <thead className="bg-slate-50/80 border-b border-slate-200 text-slate-500 font-bold uppercase tracking-wider text-[11px]">
+                                <table className="w-full text-left text-xs whitespace-nowrap">
+                                    <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold uppercase text-[11px]">
                                         <tr>
-                                            <th className="py-3.5 px-4 sm:px-6">CODE / DATE</th>
-                                            <th className="py-3.5 px-4 sm:px-6">PET PARENT</th>
-                                            <th className="py-3.5 px-4 sm:px-6">PET &amp; SERVICE</th>
-                                            <th className="py-3.5 px-4 sm:px-6">STATUS</th>
-                                            <th className="py-3.5 px-4 sm:px-6 text-right">ACTIONS</th>
+                                            <th className="py-2.5 px-3">Booking Code</th>
+                                            <th className="py-2.5 px-3">Date &amp; Time</th>
+                                            <th className="py-2.5 px-3">Customer Name</th>
+                                            <th className="py-2.5 px-3">Phone</th>
+                                            <th className="py-2.5 px-3">Pet</th>
+                                            <th className="py-2.5 px-3">Service</th>
+                                            <th className="py-2.5 px-3">City / Area</th>
+                                            <th className="py-2.5 px-3">Notes / Slot</th>
+                                            <th className="py-2.5 px-3">Status</th>
+                                            <th className="py-2.5 px-3 text-right">Actions</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-100">
                                         {isLoading ? (
                                             <tr>
-                                                <td colSpan={5} className="py-12 text-center text-slate-400">
-                                                    Loading leads database...
+                                                <td colSpan={10} className="py-10 text-center text-slate-400">
+                                                    Loading data...
                                                 </td>
                                             </tr>
                                         ) : filteredLeads.length === 0 ? (
                                             <tr>
-                                                <td colSpan={5} className="py-12 text-center text-slate-400">
-                                                    No leads matching your current criteria.
+                                                <td colSpan={10} className="py-12 text-center text-slate-500">
+                                                    <div className="max-w-xs mx-auto text-center">
+                                                        <div className="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-2 text-slate-400">
+                                                            📋
+                                                        </div>
+                                                        <p className="font-semibold text-slate-700">No leads recorded yet</p>
+                                                        <p className="text-[11px] text-slate-400 mt-1">
+                                                            When customers submit the hero or booking form on your website, leads will appear here in real time.
+                                                        </p>
+                                                    </div>
                                                 </td>
                                             </tr>
                                         ) : (
                                             filteredLeads.map((lead) => {
                                                 const cleanPhone = (lead.phone || '').replace(/\D/g, '');
-                                                const waUrl = `https://wa.me/${cleanPhone.startsWith('91') ? cleanPhone : '91' + cleanPhone}?text=${encodeURIComponent(
+                                                const waPhone = cleanPhone.startsWith('91') ? cleanPhone : '91' + cleanPhone;
+                                                const waUrl = `https://wa.me/${waPhone}?text=${encodeURIComponent(
                                                     `Hi ${lead.name || 'there'}! This is DeePet Services regarding your consultation booking (${lead.code}). How can we assist you today?`
                                                 )}`;
 
                                                 return (
-                                                    <tr key={lead.id} className="hover:bg-slate-50/60 transition-colors">
-                                                        {/* Code & Date */}
-                                                        <td className="py-4 px-4 sm:px-6 align-top">
-                                                            <div className="font-mono font-bold text-[#65a30d] text-sm">
-                                                                {lead.code}
-                                                            </div>
-                                                            <div className="text-[11px] text-slate-400 mt-0.5">
-                                                                {lead.timestamp?.split(',')[0] || lead.date || 'Recent'}
-                                                            </div>
-                                                            <span className="inline-block mt-1 text-[10px] text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">
-                                                                {lead.source}
+                                                    <tr key={lead.id} className="hover:bg-slate-50 transition-colors">
+                                                        {/* Code */}
+                                                        <td className="py-2.5 px-3 font-mono font-bold text-emerald-700">
+                                                            {lead.code}
+                                                        </td>
+
+                                                        {/* Date */}
+                                                        <td className="py-2.5 px-3 text-slate-500">
+                                                            {lead.timestamp || lead.date || 'Recent'}
+                                                        </td>
+
+                                                        {/* Name */}
+                                                        <td className="py-2.5 px-3 font-semibold text-slate-900">
+                                                            {lead.name}
+                                                        </td>
+
+                                                        {/* Phone */}
+                                                        <td className="py-2.5 px-3">
+                                                            <a href={`tel:${lead.phone}`} className="text-blue-600 hover:underline font-mono">
+                                                                {lead.phone}
+                                                            </a>
+                                                        </td>
+
+                                                        {/* Pet Type */}
+                                                        <td className="py-2.5 px-3">
+                                                            <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-700">
+                                                                {lead.petType || 'Pet'}
                                                             </span>
                                                         </td>
 
-                                                        {/* Pet Parent */}
-                                                        <td className="py-4 px-4 sm:px-6 align-top">
-                                                            <div className="font-bold text-[#003451] text-sm sm:text-base">
-                                                                {lead.name}
-                                                            </div>
-                                                            <a
-                                                                href={`tel:${lead.phone}`}
-                                                                className="text-xs text-slate-600 hover:text-[#003451] font-medium block mt-0.5 hover:underline"
-                                                            >
-                                                                {lead.phone}
-                                                            </a>
-                                                            {(lead.city || lead.pincode) && (
-                                                                <div className="text-[11px] text-slate-400 flex items-center gap-1 mt-1">
-                                                                    <MapPin className="w-3 h-3 text-slate-400" />
-                                                                    <span>{lead.city} {lead.pincode ? `(${lead.pincode})` : ''}</span>
-                                                                </div>
-                                                            )}
-                                                            {lead.message && (
-                                                                <p className="text-[11px] text-slate-500 bg-slate-50 p-1.5 rounded mt-1.5 border border-slate-100 line-clamp-2 max-w-xs">
-                                                                    &ldquo;{lead.message}&rdquo;
-                                                                </p>
-                                                            )}
+                                                        {/* Service */}
+                                                        <td className="py-2.5 px-3 text-slate-800">
+                                                            {lead.service || 'General Consultation'}
                                                         </td>
 
-                                                        {/* Pet & Service */}
-                                                        <td className="py-4 px-4 sm:px-6 align-top">
-                                                            {lead.petType && (
-                                                                <span className="inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-slate-100 text-slate-700 border border-slate-200 mb-1.5">
-                                                                    {lead.petType}
-                                                                </span>
-                                                            )}
-                                                            <div className="font-semibold text-slate-800 text-xs sm:text-sm">
-                                                                {lead.service || 'In-Home Vet Visit'}
-                                                            </div>
-                                                            {lead.category && (
-                                                                <div className="text-[11px] text-slate-500 mt-0.5">
-                                                                    {lead.category} {lead.price ? `• ₹${lead.price}` : ''}
-                                                                </div>
-                                                            )}
-                                                            {lead.date && (
-                                                                <div className="text-[11px] text-[#003451] font-medium flex items-center gap-1 mt-1">
-                                                                    <Calendar className="w-3 h-3 text-[#95c93d]" />
-                                                                    <span>{lead.date} {lead.timeSlot ? `(${lead.timeSlot})` : ''}</span>
-                                                                </div>
-                                                            )}
+                                                        {/* City */}
+                                                        <td className="py-2.5 px-3 text-slate-600">
+                                                            {lead.city || 'Delhi NCR'} {lead.pincode ? `(${lead.pincode})` : ''}
+                                                        </td>
+
+                                                        {/* Notes / Date */}
+                                                        <td className="py-2.5 px-3 text-slate-500 max-w-xs truncate" title={lead.message || lead.timeSlot || ''}>
+                                                            {lead.date ? `${lead.date} ` : ''}{lead.timeSlot ? `[${lead.timeSlot}] ` : ''}{lead.message || '-'}
                                                         </td>
 
                                                         {/* Status Dropdown */}
-                                                        <td className="py-4 px-4 sm:px-6 align-top">
+                                                        <td className="py-2.5 px-3">
                                                             <select
                                                                 value={lead.status}
                                                                 onChange={(e) => handleStatusChange(lead.id, e.target.value as Lead['status'])}
-                                                                className={`text-xs font-bold px-3 py-1.5 rounded-full border cursor-pointer focus:outline-none transition-all ${
+                                                                className={`text-[11px] font-semibold px-2 py-0.5 rounded border cursor-pointer focus:outline-none ${
                                                                     lead.status === 'Completed'
                                                                         ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
                                                                         : lead.status === 'Pending'
@@ -753,33 +923,25 @@ export default function AdminDashboardPage() {
                                                             </select>
                                                         </td>
 
-                                                        {/* Actions: WhatsApp & Call */}
-                                                        <td className="py-4 px-4 sm:px-6 align-top text-right">
+                                                        {/* Actions: ONLY WhatsApp and Phone Call (DELETE REMOVED) */}
+                                                        <td className="py-2.5 px-3 text-right">
                                                             <div className="inline-flex items-center gap-1.5">
                                                                 <a
                                                                     href={waUrl}
                                                                     target="_blank"
                                                                     rel="noopener noreferrer"
-                                                                    title="Chat on WhatsApp"
-                                                                    className="w-8 h-8 rounded-lg bg-emerald-50 hover:bg-emerald-100 border border-emerald-200/80 text-emerald-600 flex items-center justify-center transition-all"
+                                                                    title="WhatsApp Chat"
+                                                                    className="w-7 h-7 rounded bg-emerald-50 hover:bg-emerald-100 text-emerald-600 flex items-center justify-center transition-colors border border-emerald-200"
                                                                 >
-                                                                    <MessageCircle className="w-4 h-4 fill-emerald-600/20" />
+                                                                    <MessageCircle className="w-3.5 h-3.5" />
                                                                 </a>
                                                                 <a
                                                                     href={`tel:${lead.phone}`}
                                                                     title="Call Customer"
-                                                                    className="w-8 h-8 rounded-lg bg-sky-50 hover:bg-sky-100 border border-sky-200/80 text-sky-600 flex items-center justify-center transition-all"
+                                                                    className="w-7 h-7 rounded bg-blue-50 hover:bg-blue-100 text-blue-600 flex items-center justify-center transition-colors border border-blue-200"
                                                                 >
-                                                                    <Phone className="w-4 h-4" />
+                                                                    <Phone className="w-3.5 h-3.5" />
                                                                 </a>
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() => handleDeleteLead(lead.id)}
-                                                                    title="Delete Entry"
-                                                                    className="w-8 h-8 rounded-lg hover:bg-rose-50 text-slate-300 hover:text-rose-600 flex items-center justify-center transition-all cursor-pointer"
-                                                                >
-                                                                    <Trash2 className="w-3.5 h-3.5" />
-                                                                </button>
                                                             </div>
                                                         </td>
                                                     </tr>
@@ -794,391 +956,255 @@ export default function AdminDashboardPage() {
                 )}
 
                 {/* =========================================================================
-                    TAB 3: EMAIL NOTIFICATION SETTINGS (REFERENCE IMAGE 2)
+                    TAB 3: EMAIL NOTIFICATION SETTINGS (CLEAN SIMPLE LOOK)
                    ========================================================================= */}
                 {activeTab === 'email' && (
-                    <div className="max-w-4xl mx-auto space-y-6">
+                    <div className="max-w-2xl mx-auto space-y-5">
                         <div>
-                            <h1 className="text-2xl sm:text-3xl font-extrabold text-[#003451] tracking-tight">
-                                Email Notification Settings
-                            </h1>
-                            <p className="text-slate-500 text-xs sm:text-sm mt-1">
-                                Configure the email address where all consultation requests and lead bookings will be delivered.
+                            <h1 className="text-xl font-bold text-slate-900">Email Notification Settings</h1>
+                            <p className="text-xs text-slate-500 mt-0.5">
+                                Set where new lead bookings and consultation notifications are delivered.
                             </p>
                         </div>
 
-                        {/* Settings Card */}
-                        <form onSubmit={handleSaveSettings} className="bg-white rounded-3xl p-6 sm:p-8 border border-slate-200/80 shadow-xs space-y-6">
-                            {/* Recipient Email Address */}
-                            <div className="space-y-1.5">
-                                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">
-                                    NOTIFICATION RECIPIENT EMAIL ADDRESS
+                        <form onSubmit={handleSaveSettings} className="bg-white p-6 rounded-lg border border-slate-200 space-y-4">
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                                    Notification Recipient Email Address
                                 </label>
-                                <p className="text-xs text-slate-400">
-                                    All consultation inquiries and lead bookings submitted by pet parents will be sent to this email address. You can update this email anytime.
-                                </p>
                                 <input
                                     type="email"
                                     required
                                     value={settings.notificationRecipientEmail}
                                     onChange={(e) => setSettings({ ...settings, notificationRecipientEmail: e.target.value })}
-                                    className="w-full px-4 py-3 rounded-xl bg-white border border-slate-200 text-slate-800 font-medium text-sm focus:outline-none focus:ring-2 focus:ring-[#95c93d] focus:border-transparent transition-all"
+                                    className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-md focus:outline-none focus:ring-1 focus:ring-slate-900"
                                     placeholder="e.g. deepetservices1@gmail.com"
                                 />
+                                <p className="text-[11px] text-slate-400 mt-1">
+                                    All booking submissions by customers will be sent to this email.
+                                </p>
                             </div>
 
-                            {/* Sender Display Name */}
-                            <div className="space-y-1.5">
-                                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">
-                                    SENDER DISPLAY NAME
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                                    Sender Display Name
                                 </label>
                                 <input
                                     type="text"
                                     value={settings.senderDisplayName}
                                     onChange={(e) => setSettings({ ...settings, senderDisplayName: e.target.value })}
-                                    className="w-full px-4 py-3 rounded-xl bg-white border border-slate-200 text-slate-800 font-medium text-sm focus:outline-none focus:ring-2 focus:ring-[#95c93d] focus:border-transparent transition-all"
+                                    className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-md focus:outline-none focus:ring-1 focus:ring-slate-900"
                                     placeholder="DeePets Notifications"
                                 />
                             </div>
 
-                            {/* Checkbox */}
-                            <div className="flex items-center gap-3 pt-2">
+                            <div className="flex items-center gap-2 pt-1">
                                 <input
                                     type="checkbox"
                                     id="enable_notifications"
                                     checked={settings.enableEmailNotifications}
                                     onChange={(e) => setSettings({ ...settings, enableEmailNotifications: e.target.checked })}
-                                    className="w-4 h-4 rounded text-[#95c93d] focus:ring-[#95c93d] cursor-pointer"
+                                    className="w-4 h-4 rounded text-slate-900 focus:ring-slate-900 cursor-pointer"
                                 />
-                                <label htmlFor="enable_notifications" className="text-xs sm:text-sm font-semibold text-slate-700 cursor-pointer">
-                                    Enable email notifications for new consultation bookings
+                                <label htmlFor="enable_notifications" className="text-xs font-medium text-slate-700 cursor-pointer">
+                                    Enable email notifications for new bookings
                                 </label>
                             </div>
 
-                            {/* Action Buttons */}
-                            <div className="flex flex-wrap items-center gap-3 pt-4 border-t border-slate-100">
+                            <div className="flex items-center gap-2 pt-3 border-t border-slate-100">
                                 <button
                                     type="submit"
                                     disabled={isSavingSettings}
-                                    className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-[#95c93d] hover:bg-[#86b834] text-[#003451] font-bold text-sm shadow-sm transition-all cursor-pointer active:scale-95"
+                                    className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded-md shadow-2xs transition-colors cursor-pointer"
                                 >
-                                    {settingsSaved ? (
-                                        <>
-                                            <Check className="w-4 h-4" />
-                                            <span>Settings Saved!</span>
-                                        </>
-                                    ) : (
-                                        <span>Save Email Settings</span>
-                                    )}
+                                    {settingsSaved ? 'Saved Successfully!' : 'Save Email Settings'}
                                 </button>
-
                                 <button
                                     type="button"
                                     onClick={handleSendTestEmail}
                                     disabled={isSendingTestEmail}
-                                    className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-[#003451] hover:bg-[#00263b] text-white font-bold text-sm shadow-sm transition-all cursor-pointer active:scale-95"
+                                    className="px-4 py-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 text-xs font-semibold rounded-md shadow-2xs transition-colors cursor-pointer"
                                 >
-                                    <Send className={`w-4 h-4 ${isSendingTestEmail ? 'animate-pulse' : ''}`} />
-                                    <span>{isSendingTestEmail ? 'Sending...' : 'Send Test Email Now'}</span>
+                                    {isSendingTestEmail ? 'Sending...' : 'Send Test Email'}
                                 </button>
                             </div>
 
                             {testEmailStatus && (
-                                <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 text-xs font-semibold text-slate-700 flex items-center gap-2">
-                                    <AlertCircle className="w-4 h-4 text-[#95c93d]" />
+                                <div className="p-3 rounded-md bg-slate-50 border border-slate-200 text-xs text-slate-700 flex items-center gap-2">
+                                    <AlertCircle className="w-4 h-4 text-slate-500" />
                                     <span>{testEmailStatus}</span>
                                 </div>
                             )}
                         </form>
 
-                        {/* Active Email Delivery Setup Callout Card (Reference Image 2) */}
-                        <div className="bg-[#0b1a28] rounded-3xl p-6 sm:p-7 text-white shadow-xl border border-slate-800 space-y-3">
-                            <div className="flex items-center gap-2 text-emerald-400 font-bold text-sm">
-                                <Mail className="w-4 h-4" />
-                                <span>Active Email Delivery Setup</span>
+                        <div className="bg-slate-900 text-slate-200 p-5 rounded-lg text-xs space-y-2">
+                            <div className="font-semibold text-white flex items-center gap-1.5">
+                                <Mail className="w-4 h-4 text-emerald-400" />
+                                <span>Active Sender Setup</span>
                             </div>
-
-                            <ul className="space-y-1.5 text-xs sm:text-sm text-slate-300 font-mono">
-                                <li className="flex items-center gap-2">
-                                    <span className="text-slate-500">•</span>
-                                    <span>Sender Email: <strong className="text-white">{settings.senderEmail || 'contact@deepetservices.com'}</strong></span>
-                                </li>
-                                <li className="flex items-center gap-2">
-                                    <span className="text-slate-500">•</span>
-                                    <span>Active Recipient Email: <strong className="text-white">{settings.notificationRecipientEmail || 'deepetservices1@gmail.com'}</strong></span>
-                                </li>
-                                <li className="flex items-center gap-2">
-                                    <span className="text-slate-500">•</span>
-                                    <span>Delivery Engine: <strong className="text-white">Resend API / SMTP (Verified Domain)</strong></span>
-                                </li>
-                            </ul>
+                            <p className="text-slate-400">
+                                Sender: <strong className="text-white">{settings.senderEmail || 'contact@deepetservices.com'}</strong>
+                            </p>
+                            <p className="text-slate-400">
+                                Recipient: <strong className="text-white">{settings.notificationRecipientEmail || 'deepetservices1@gmail.com'}</strong>
+                            </p>
                         </div>
                     </div>
                 )}
 
                 {/* =========================================================================
-                    TAB 4: GOOGLE SHEET INTEGRATION (REFERENCE IMAGE 4 & 5)
+                    TAB 4: GOOGLE SHEET INTEGRATION (CLEAN SIMPLE LOOK)
                    ========================================================================= */}
                 {activeTab === 'sheets' && (
-                    <div className="max-w-4xl mx-auto space-y-8">
+                    <div className="max-w-2xl mx-auto space-y-5">
                         <div>
-                            <div className="flex items-center gap-2">
-                                <FileSpreadsheet className="w-6 h-6 text-emerald-600" />
-                                <h1 className="text-2xl sm:text-3xl font-extrabold text-[#003451] tracking-tight">
-                                    Google Sheet Integration
-                                </h1>
-                            </div>
-                            <p className="text-slate-500 text-xs sm:text-sm mt-1">
-                                Connect your Google Sheet via Apps Script Webhook to automatically receive all incoming consultation leads in real-time with proper table headers.
+                            <h1 className="text-xl font-bold text-slate-900">Google Sheet Integration</h1>
+                            <p className="text-xs text-slate-500 mt-0.5">
+                                Automatically push incoming leads to your Google Sheet in real time.
                             </p>
                         </div>
 
-                        {/* Webhook URL Input Card */}
-                        <div className="bg-white rounded-3xl p-6 sm:p-8 border border-slate-200/80 shadow-xs space-y-5">
-                            <div className="space-y-1.5">
-                                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">
-                                    GOOGLE APPS SCRIPT WEBHOOK URL
+                        <div className="bg-white p-6 rounded-lg border border-slate-200 space-y-4">
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                                    Google Apps Script Webhook URL
                                 </label>
-                                <p className="text-xs text-slate-400">
-                                    Paste your deployed Google Apps Script Web App URL below (e.g., https://script.google.com/macros/s/.../exec).
-                                </p>
                                 <input
                                     type="url"
                                     value={settings.googleScriptWebhookUrl}
                                     onChange={(e) => setSettings({ ...settings, googleScriptWebhookUrl: e.target.value })}
-                                    placeholder="https://script.google.com/macros/s/AKfycb.../exec"
-                                    className="w-full px-4 py-3 rounded-xl bg-white border border-slate-200 text-slate-800 font-mono text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-[#95c93d] focus:border-transparent transition-all"
+                                    placeholder="https://script.google.com/macros/s/.../exec"
+                                    className="w-full px-3 py-2 text-xs font-mono bg-white border border-slate-300 rounded-md focus:outline-none focus:ring-1 focus:ring-slate-900"
                                 />
                             </div>
 
-                            <div className="flex flex-wrap items-center gap-3">
+                            <div className="flex items-center gap-2">
                                 <button
                                     type="button"
                                     onClick={handleSaveSettings}
                                     disabled={isSavingSettings}
-                                    className="inline-flex items-center gap-2 px-6 py-2.5 rounded-xl bg-[#95c93d] hover:bg-[#86b834] text-[#003451] font-bold text-xs sm:text-sm shadow-sm transition-all cursor-pointer active:scale-95"
+                                    className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded-md shadow-2xs transition-colors cursor-pointer"
                                 >
-                                    {settingsSaved ? (
-                                        <>
-                                            <Check className="w-4 h-4" />
-                                            <span>Saved!</span>
-                                        </>
-                                    ) : (
-                                        <span>Save Webhook URL</span>
-                                    )}
+                                    {settingsSaved ? 'Saved!' : 'Save Webhook URL'}
                                 </button>
-
                                 <button
                                     type="button"
                                     onClick={handleSendTestWebhook}
                                     disabled={isSendingTestWebhook || !settings.googleScriptWebhookUrl}
-                                    className="inline-flex items-center gap-2 px-6 py-2.5 rounded-xl bg-[#003451] hover:bg-[#00263b] disabled:bg-slate-300 text-white font-bold text-xs sm:text-sm shadow-sm transition-all cursor-pointer active:scale-95"
+                                    className="px-4 py-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 text-xs font-semibold rounded-md shadow-2xs transition-colors cursor-pointer disabled:opacity-50"
                                 >
-                                    <Send className={`w-4 h-4 ${isSendingTestWebhook ? 'animate-pulse' : ''}`} />
-                                    <span>{isSendingTestWebhook ? 'Testing...' : 'Send Test Lead to Google Sheet'}</span>
+                                    {isSendingTestWebhook ? 'Testing...' : 'Send Test Lead to Sheet'}
                                 </button>
                             </div>
 
                             {testWebhookStatus && (
-                                <div className={`p-3.5 rounded-xl text-xs font-semibold flex items-center gap-2 border ${
+                                <div className={`p-3 rounded-md text-xs font-medium border ${
                                     testWebhookStatus.startsWith('Success')
                                         ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
                                         : 'bg-rose-50 text-rose-800 border-rose-200'
                                 }`}>
-                                    <AlertCircle className="w-4 h-4" />
-                                    <span>{testWebhookStatus}</span>
+                                    {testWebhookStatus}
                                 </div>
                             )}
                         </div>
 
-                        {/* Step-by-Step Instructions Card (Reference Image 4) */}
-                        <div className="bg-white rounded-3xl p-6 sm:p-8 border border-slate-200/80 shadow-xs space-y-6">
+                        {/* Step by step guide */}
+                        <div className="bg-white p-6 rounded-lg border border-slate-200 space-y-3">
                             <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-2 text-[#003451] font-bold text-base sm:text-lg">
-                                    <span>✨ Step-by-Step Google Sheet Setup Instructions</span>
-                                </div>
+                                <h2 className="text-sm font-bold text-slate-900">Setup Instructions</h2>
                                 <button
                                     type="button"
                                     onClick={copyAppsScript}
-                                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#003451] hover:bg-[#00263b] text-white font-bold text-xs shadow-xs transition-all cursor-pointer active:scale-95"
+                                    className="inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 font-semibold cursor-pointer"
                                 >
-                                    {copiedScript ? (
-                                        <>
-                                            <Check className="w-3.5 h-3.5 text-[#bfe37f]" />
-                                            <span>Copied Script!</span>
-                                        </>
-                                    ) : (
-                                        <>
-                                            <Copy className="w-3.5 h-3.5" />
-                                            <span>Copy Apps Script Code</span>
-                                        </>
-                                    )}
+                                    {copiedScript ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                                    <span>{copiedScript ? 'Copied!' : 'Copy Script'}</span>
                                 </button>
                             </div>
 
-                            <ol className="space-y-4 text-xs sm:text-sm text-slate-700">
-                                <li className="flex items-start gap-3">
-                                    <span className="w-6 h-6 rounded-full bg-slate-100 border border-slate-300 font-bold text-slate-700 text-xs flex items-center justify-center shrink-0 mt-0.5">
-                                        1
-                                    </span>
-                                    <div>
-                                        <strong>Create a Google Sheet:</strong> Open{' '}
-                                        <a href="https://sheets.new" target="_blank" rel="noopener noreferrer" className="text-[#003451] font-bold underline">
-                                            sheets.new
-                                        </a>{' '}
-                                        (or use your existing sheet). If the sheet is brand new or missing headers, the script below will automatically create, format, and freeze the header row for you!
-                                    </div>
-                                </li>
-                                <li className="flex items-start gap-3">
-                                    <span className="w-6 h-6 rounded-full bg-slate-100 border border-slate-300 font-bold text-slate-700 text-xs flex items-center justify-center shrink-0 mt-0.5">
-                                        2
-                                    </span>
-                                    <div>
-                                        <strong>Open Script Editor:</strong> In your Google Sheet, click{' '}
-                                        <code className="bg-slate-100 px-1.5 py-0.5 rounded font-mono text-slate-800">
-                                            Extensions → Apps Script
-                                        </code>{' '}
-                                        from the top navigation menu.
-                                    </div>
-                                </li>
-                                <li className="flex items-start gap-3">
-                                    <span className="w-6 h-6 rounded-full bg-slate-100 border border-slate-300 font-bold text-slate-700 text-xs flex items-center justify-center shrink-0 mt-0.5">
-                                        3
-                                    </span>
-                                    <div className="w-full">
-                                        <div className="flex items-center justify-between mb-2">
-                                            <div>
-                                                <strong>Paste Apps Script Code:</strong> Erase everything inside{' '}
-                                                <code className="bg-slate-100 px-1.5 py-0.5 rounded font-mono text-slate-800">
-                                                    Code.gs
-                                                </code>{' '}
-                                                and paste this exact script:
-                                            </div>
-                                            <button
-                                                type="button"
-                                                onClick={copyAppsScript}
-                                                className="text-xs text-slate-500 hover:text-slate-800 font-medium inline-flex items-center gap-1 cursor-pointer"
-                                            >
-                                                <Copy className="w-3 h-3" />
-                                                <span>Copy Code</span>
-                                            </button>
-                                        </div>
-
-                                        {/* Code Viewer Container */}
-                                        <div className="bg-[#0b1a28] rounded-2xl p-4 sm:p-5 text-slate-200 font-mono text-xs overflow-x-auto max-h-80 border border-slate-800 shadow-inner">
-                                            <pre><code>{APPS_SCRIPT_CODE}</code></pre>
-                                        </div>
-                                    </div>
-                                </li>
-                                <li className="flex items-start gap-3">
-                                    <span className="w-6 h-6 rounded-full bg-slate-100 border border-slate-300 font-bold text-slate-700 text-xs flex items-center justify-center shrink-0 mt-0.5">
-                                        4
-                                    </span>
-                                    <div>
-                                        <strong>Deploy as Web App:</strong> In Apps Script, click{' '}
-                                        <code className="bg-slate-100 px-1.5 py-0.5 rounded font-mono text-slate-800">
-                                            Deploy → New deployment
-                                        </code>
-                                        . Select type{' '}
-                                        <strong>Web app</strong>, set <em>Execute as:</em> <strong>Me</strong>, and set <em>Who has access:</em> <strong>Anyone</strong>. Click <strong>Deploy</strong> and copy the generated Web App URL into the input field above!
-                                    </div>
-                                </li>
+                            <ol className="list-decimal list-inside space-y-2 text-xs text-slate-600 leading-relaxed">
+                                <li>Create a new spreadsheet at <a href="https://sheets.new" target="_blank" rel="noopener noreferrer" className="text-blue-600 underline font-medium">sheets.new</a></li>
+                                <li>In the Google Sheet menu, click <strong>Extensions → Apps Script</strong></li>
+                                <li>Replace everything in <code>Code.gs</code> with the copied script code.</li>
+                                <li>Click <strong>Deploy → New deployment</strong>, select <strong>Web app</strong>, set <em>Who has access</em> to <strong>Anyone</strong>, and copy the Web App URL here.</li>
                             </ol>
                         </div>
+                    </div>
+                )}
 
-                        {/* Column Structure & Headings Reference (Reference Image 5) */}
-                        <div className="bg-white rounded-3xl p-6 sm:p-8 border border-slate-200/80 shadow-xs space-y-4">
-                            <div className="flex items-center gap-2">
-                                <FileSpreadsheet className="w-5 h-5 text-emerald-600" />
-                                <h2 className="text-base sm:text-lg font-bold text-[#003451]">
-                                    Google Sheet Column Structure &amp; Headings Reference
-                                </h2>
-                            </div>
-                            <p className="text-xs sm:text-sm text-slate-500">
-                                When leads are submitted, each piece of data is placed into the designated column as mapped below:
+                {/* =========================================================================
+                    TAB 5: CHANGE PASSWORD & CREDENTIALS
+                   ========================================================================= */}
+                {activeTab === 'security' && (
+                    <div className="max-w-md mx-auto space-y-5">
+                        <div>
+                            <h1 className="text-xl font-bold text-slate-900">Admin Credentials</h1>
+                            <p className="text-xs text-slate-500 mt-0.5">
+                                Update the login username and password for this admin panel.
                             </p>
-
-                            <div className="overflow-x-auto rounded-2xl border border-slate-200">
-                                <table className="w-full text-left text-xs sm:text-sm">
-                                    <thead className="bg-[#0b1a28] text-white font-bold text-xs">
-                                        <tr>
-                                            <th className="py-3 px-4 w-16">Col</th>
-                                            <th className="py-3 px-4">Header Name</th>
-                                            <th className="py-3 px-4">Data Field</th>
-                                            <th className="py-3 px-4">Example Value</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
-                                        <tr className="hover:bg-slate-50">
-                                            <td className="py-3 px-4 font-bold text-[#003451]">A</td>
-                                            <td className="py-3 px-4 font-bold">Consultation Code</td>
-                                            <td className="py-3 px-4 text-slate-500">Unique ID</td>
-                                            <td className="py-3 px-4 font-mono text-[#65a30d] font-bold">DEPWEB0030</td>
-                                        </tr>
-                                        <tr className="hover:bg-slate-50">
-                                            <td className="py-3 px-4 font-bold text-[#003451]">B</td>
-                                            <td className="py-3 px-4 font-bold">Customer Name</td>
-                                            <td className="py-3 px-4 text-slate-500">Name</td>
-                                            <td className="py-3 px-4">Adnan Ali</td>
-                                        </tr>
-                                        <tr className="hover:bg-slate-50">
-                                            <td className="py-3 px-4 font-bold text-[#003451]">C</td>
-                                            <td className="py-3 px-4 font-bold">Phone Number</td>
-                                            <td className="py-3 px-4 text-slate-500">Contact Number</td>
-                                            <td className="py-3 px-4 font-mono">+91 9889989899</td>
-                                        </tr>
-                                        <tr className="hover:bg-slate-50">
-                                            <td className="py-3 px-4 font-bold text-[#003451]">D</td>
-                                            <td className="py-3 px-4 font-bold">Pet Type</td>
-                                            <td className="py-3 px-4 text-slate-500">Dog / Cat</td>
-                                            <td className="py-3 px-4">Dog</td>
-                                        </tr>
-                                        <tr className="hover:bg-slate-50">
-                                            <td className="py-3 px-4 font-bold text-[#003451]">E</td>
-                                            <td className="py-3 px-4 font-bold">Category</td>
-                                            <td className="py-3 px-4 text-slate-500">Service Category</td>
-                                            <td className="py-3 px-4">Preventive Wellness</td>
-                                        </tr>
-                                        <tr className="hover:bg-slate-50">
-                                            <td className="py-3 px-4 font-bold text-[#003451]">F</td>
-                                            <td className="py-3 px-4 font-bold">Service / Package</td>
-                                            <td className="py-3 px-4 text-slate-500">Selected Package / Test</td>
-                                            <td className="py-3 px-4">Wellness 360° — Adult Pet</td>
-                                        </tr>
-                                        <tr className="hover:bg-slate-50">
-                                            <td className="py-3 px-4 font-bold text-[#003451]">G</td>
-                                            <td className="py-3 px-4 font-bold">Price (₹)</td>
-                                            <td className="py-3 px-4 text-slate-500">Package Cost</td>
-                                            <td className="py-3 px-4 font-mono">4999</td>
-                                        </tr>
-                                        <tr className="hover:bg-slate-50">
-                                            <td className="py-3 px-4 font-bold text-[#003451]">H</td>
-                                            <td className="py-3 px-4 font-bold">City</td>
-                                            <td className="py-3 px-4 text-slate-500">Location</td>
-                                            <td className="py-3 px-4">Delhi NCR</td>
-                                        </tr>
-                                        <tr className="hover:bg-slate-50">
-                                            <td className="py-3 px-4 font-bold text-[#003451]">I</td>
-                                            <td className="py-3 px-4 font-bold">Pincode</td>
-                                            <td className="py-3 px-4 text-slate-500">Postal Code</td>
-                                            <td className="py-3 px-4 font-mono">110001</td>
-                                        </tr>
-                                        <tr className="hover:bg-slate-50">
-                                            <td className="py-3 px-4 font-bold text-[#003451]">J</td>
-                                            <td className="py-3 px-4 font-bold">Message / Preferred Date</td>
-                                            <td className="py-3 px-4 text-slate-500">Notes / Schedule</td>
-                                            <td className="py-3 px-4">Preferred date: 2026-11-05</td>
-                                        </tr>
-                                        <tr className="hover:bg-slate-50">
-                                            <td className="py-3 px-4 font-bold text-[#003451]">K</td>
-                                            <td className="py-3 px-4 font-bold">Submission Timestamp</td>
-                                            <td className="py-3 px-4 text-slate-500">Date &amp; Time</td>
-                                            <td className="py-3 px-4 font-mono text-xs">19/11/2026, 12:44:50</td>
-                                        </tr>
-                                    </tbody>
-                                </table>
-                            </div>
                         </div>
+
+                        <form onSubmit={handleChangeCredentials} className="bg-white p-6 rounded-lg border border-slate-200 space-y-4">
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                                    Current Password
+                                </label>
+                                <input
+                                    type="password"
+                                    required
+                                    value={currentPassword}
+                                    onChange={(e) => setCurrentPassword(e.target.value)}
+                                    placeholder="Enter current password (default: 1)"
+                                    className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-md focus:outline-none focus:ring-1 focus:ring-slate-900"
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                                    Admin Username
+                                </label>
+                                <input
+                                    type="text"
+                                    required
+                                    value={newUsername}
+                                    onChange={(e) => setNewUsername(e.target.value)}
+                                    placeholder="Username (default: 1)"
+                                    className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-md focus:outline-none focus:ring-1 focus:ring-slate-900"
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                                    New Password
+                                </label>
+                                <input
+                                    type="password"
+                                    required
+                                    value={newPassword}
+                                    onChange={(e) => setNewPassword(e.target.value)}
+                                    placeholder="Enter new password"
+                                    className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-md focus:outline-none focus:ring-1 focus:ring-slate-900"
+                                />
+                            </div>
+
+                            <button
+                                type="submit"
+                                disabled={isChangingPassword}
+                                className="w-full py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded-md shadow-2xs transition-colors cursor-pointer"
+                            >
+                                {isChangingPassword ? 'Updating...' : 'Update Password'}
+                            </button>
+
+                            {passwordChangeStatus && (
+                                <div className={`p-3 rounded-md text-xs font-medium border ${
+                                    passwordChangeStatus.startsWith('Success')
+                                        ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                        : 'bg-rose-50 text-rose-800 border-rose-200'
+                                }`}>
+                                    {passwordChangeStatus}
+                                </div>
+                            )}
+                        </form>
                     </div>
                 )}
 
@@ -1186,4 +1212,3 @@ export default function AdminDashboardPage() {
         </div>
     );
 }
-

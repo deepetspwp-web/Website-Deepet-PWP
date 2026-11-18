@@ -3,6 +3,7 @@
   "senderDisplayName": "DeePets Notifications",
   "senderEmail": "contact@deepetservices.com",
   "enableEmailNotifications": true,
-  "googleScriptWebhookUrl": ""
+  "googleScriptWebhookUrl": "",
+  "adminUsername": "1",
+  "adminPassword": "1"
 }
-
