@@ -21,3 +21,4 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: 'Failed to save settings' }, { status: 500 });
     }
 }
+
