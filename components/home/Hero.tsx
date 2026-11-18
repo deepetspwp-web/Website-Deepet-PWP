@@ -64,6 +64,8 @@ export function Hero() {
             });
 
             if (response.ok) {
+                const resData = await response.json().catch(() => ({}));
+                const bookingId = resData.bookingId || resData.code || 'DEPWEB001';
                 setFormData({
                     petType: 'dog',
                     service: 'General Consultation',
@@ -73,7 +75,7 @@ export function Hero() {
                     pincode: '',
                     message: ''
                 });
-                router.push('/thank-you');
+                router.push(`/thank-you?bookingId=${encodeURIComponent(bookingId)}`);
             } else {
                 const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
                 alert(`Failed to send booking request: ${errorData.error}`);

@@ -16,26 +16,14 @@ interface VideoStory {
 
 const VIDEO_TESTIMONIALS: VideoStory[] = [
     { id: 1, src: "/videos/IMG_1834.mp4", title: "Home Vet Visit & Routine Checkup", pet: "Dog Care", location: "Gurgaon", rating: 4.9 },
-    { id: 2, src: "/videos/IMG_1835.MP4", title: "Vaccination & Gentle Examination", pet: "Pet Parent", location: "Noida", rating: 4.8 },
-    { id: 3, src: "/videos/IMG_1836.MP4", title: "Stress-Free Doorstep Treatment", pet: "Happy Pet", location: "Delhi NCR", rating: 4.7 },
-    { id: 4, src: "/videos/IMG_1843.MP4", title: "Quick & Calm Pet Checkup", pet: "Dog Parent", location: "South Delhi", rating: 4.9 },
-    { id: 5, src: "/videos/IMG_1844.MP4", title: "Friendly Vet at Our Home", pet: "Furry Friend", location: "Faridabad", rating: 4.8 },
-    { id: 6, src: "/videos/IMG_1845.MP4", title: "Puppy Health & Vitals Care", pet: "Puppy Care", location: "Gurgaon", rating: 4.6 },
-    { id: 7, src: "/videos/IMG_1846.MP4", title: "Complete In-Home Medical Check", pet: "Pet Parent", location: "Dwarka", rating: 4.9 },
-    { id: 8, src: "/videos/IMG_1847.MP4", title: "Professional Veterinary Service", pet: "Happy Dog", location: "Noida", rating: 4.7 },
-    { id: 9, src: "/videos/IMG_1848.MP4", title: "Safe & Relaxed Home Visit", pet: "Dog Care", location: "Delhi", rating: 4.8 },
-    { id: 10, src: "/videos/IMG_1849.MP4", title: "Doorstep Pet Health Consultation", pet: "Pet Parent", location: "Ghaziabad", rating: 4.5 },
-    { id: 11, src: "/videos/IMG_1850.MP4", title: "Gentle Treatment at Home", pet: "Furry Family", location: "Gurgaon", rating: 4.9 },
-    { id: 12, src: "/videos/IMG_1851.MP4", title: "At-Home Vaccination & Advice", pet: "Pet Care", location: "South Delhi", rating: 4.8 },
-    { id: 13, src: "/videos/IMG_1852.MP4", title: "Doctor Treating Our Pet with Love", pet: "Happy Pet", location: "Noida", rating: 4.7 },
-    { id: 14, src: "/videos/IMG_1853.MP4", title: "No Clinic Travel, Total Comfort", pet: "Dog Parent", location: "Delhi NCR", rating: 4.9 },
-    { id: 15, src: "/videos/IMG_1855.MP4", title: "Comprehensive Health Exam", pet: "Pet Parent", location: "Faridabad", rating: 4.6 },
-    { id: 16, src: "/videos/IMG_1856.MP4", title: "Comfortable Home Checkup", pet: "Furry Friend", location: "Gurgaon", rating: 4.8 },
-    { id: 17, src: "/videos/IMG_1857.MP4", title: "Trusted Home Vet Experience", pet: "Dog Care", location: "Delhi", rating: 4.9 },
-    { id: 18, src: "/videos/IMG_1858.MP4", title: "Prompt & Caring Doorstep Vet", pet: "Pet Parent", location: "Noida", rating: 4.7 },
-    { id: 19, src: "/videos/IMG_1859.MP4", title: "Calm Living Room Consultation", pet: "Happy Dog", location: "South Delhi", rating: 4.8 },
-    { id: 20, src: "/videos/IMG_1860.MP4", title: "Safe In-Home Pet Treatment", pet: "Puppy Care", location: "Gurgaon", rating: 4.4 },
-    { id: 21, src: "/videos/IMG_1861.MP4", title: "Happy Pet, Relieved Parent", pet: "Pet Parent", location: "Delhi NCR", rating: 4.9 },
+    { id: 2, src: "/videos/IMG_1844.MP4", title: "Friendly Vet at Our Home", pet: "Furry Friend", location: "Faridabad", rating: 4.8 },
+    { id: 3, src: "/videos/IMG_1845.MP4", title: "Puppy Health & Vitals Care", pet: "Puppy Care", location: "Gurgaon", rating: 4.9 },
+    { id: 4, src: "/videos/IMG_1847.MP4", title: "Professional Veterinary Service", pet: "Happy Dog", location: "Noida", rating: 4.7 },
+    { id: 5, src: "/videos/IMG_1848.MP4", title: "Safe & Relaxed Home Visit", pet: "Dog Care", location: "Delhi", rating: 4.8 },
+    { id: 6, src: "/videos/IMG_1851.MP4", title: "At-Home Vaccination & Advice", pet: "Pet Care", location: "South Delhi", rating: 4.8 },
+    { id: 7, src: "/videos/IMG_1856.MP4", title: "Comfortable Home Checkup", pet: "Furry Friend", location: "Gurgaon", rating: 4.8 },
+    { id: 8, src: "/videos/IMG_1857.MP4", title: "Trusted Home Vet Experience", pet: "Dog Care", location: "Delhi", rating: 4.9 },
+    { id: 9, src: "/videos/IMG_1861.MP4", title: "Happy Pet, Relieved Parent", pet: "Pet Parent", location: "Delhi NCR", rating: 4.9 },
 ];
 
 export function Testimonials() {
@@ -95,7 +83,7 @@ export function Testimonials() {
                     </h2>
 
                     <p className="text-slate-600 text-xs sm:text-sm md:text-base leading-relaxed">
-                        Watch 21+ real doorstep visit stories captured by pet parents during our home consultations and treatments.
+                        Watch real doorstep visit stories captured by pet parents during our home consultations and treatments.
                     </p>
 
                     {/* Google Rating Trust Badge */}
@@ -108,7 +96,7 @@ export function Testimonials() {
                             </div>
                             <span className="text-xs font-bold text-[#003451]">4.8 out of 5 Rating</span>
                             <span className="text-slate-300">•</span>
-                            <span className="text-xs text-slate-500 font-medium">21 Video Testimonials</span>
+                            <span className="text-xs text-slate-500 font-medium">Verified Pet Parents</span>
                         </div>
                     </div>
                 </div>
@@ -158,6 +146,13 @@ export function Testimonials() {
                                 preload="metadata"
                                 playsInline
                                 muted
+                                onMouseEnter={(e) => {
+                                    e.currentTarget.play().catch(() => {});
+                                }}
+                                onMouseLeave={(e) => {
+                                    e.currentTarget.pause();
+                                    e.currentTarget.currentTime = 0.5;
+                                }}
                                 className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                             />
 

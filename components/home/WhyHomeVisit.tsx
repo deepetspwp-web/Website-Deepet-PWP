@@ -19,16 +19,16 @@ export function WhyHomeVisit() {
             <div className="container mx-auto px-4 md:px-6 max-w-7xl relative z-10">
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-stretch">
 
-                    {/* Left: Clean Matching Height Image (3 Easter Bunny Dogs) */}
-                    <div className="lg:col-span-6 flex flex-col h-full min-h-[300px] lg:min-h-full">
-                        <div className="relative w-full h-full min-h-[300px] aspect-[4/3] sm:aspect-[16/10] lg:aspect-auto rounded-3xl overflow-hidden shadow-xl shadow-slate-200/70 border border-slate-100 bg-slate-50 group">
+                    {/* Left: Clean Matching Height Image (Image 1 - The In-Home Advantage) */}
+                    <div className="lg:col-span-6 flex flex-col h-full min-h-[340px] lg:min-h-full">
+                        <div className="relative w-full h-full min-h-[340px] aspect-[4/3] sm:aspect-[16/10] lg:aspect-auto rounded-3xl overflow-hidden shadow-xl shadow-slate-200/70 border border-slate-100 bg-slate-50 group">
                             <Image
-                                src="/heroimages/image.avif"
-                                alt="Happy dogs enjoying home pet care"
+                                src="/heroimages/in-home-advantage.jpg"
+                                alt="The In-Home Advantage - Dogs and Cats receiving care at home"
                                 fill
                                 sizes="(max-width: 1024px) 100vw, 50vw"
                                 priority
-                                className="object-cover group-hover:scale-105 transition-transform duration-700 ease-out"
+                                className="object-cover object-center group-hover:scale-105 transition-transform duration-700 ease-out"
                             />
                         </div>
                     </div>

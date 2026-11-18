@@ -68,6 +68,8 @@ export function BookingSection() {
             });
 
             if (response.ok) {
+                const resData = await response.json().catch(() => ({}));
+                const bookingId = resData.bookingId || resData.code || 'DEPWEB001';
                 setFormData({
                     name: '',
                     phone: '',
@@ -78,7 +80,7 @@ export function BookingSection() {
                     date: '',
                     timeSlot: 'morning'
                 });
-                router.push('/thank-you');
+                router.push(`/thank-you?bookingId=${encodeURIComponent(bookingId)}`);
             } else {
                 const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
                 alert(`Failed to send booking request: ${errorData.error}`);

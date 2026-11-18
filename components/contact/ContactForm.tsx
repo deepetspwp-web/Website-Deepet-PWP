@@ -53,12 +53,15 @@ export function ContactForm() {
                 body: JSON.stringify({
                     ...formData,
                     ...utmParams,
-                    captchaToken
+                    captchaToken,
+                    source: 'Contact Page Form'
                 }),
             });
 
             if (response.ok) {
-                router.push('/thank-you');
+                const resData = await response.json().catch(() => ({}));
+                const bookingId = resData.bookingId || resData.code || 'DEPWEB001';
+                router.push(`/thank-you?bookingId=${encodeURIComponent(bookingId)}`);
             } else {
                 const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
                 alert(`Failed to send request: ${errorData.error}`);

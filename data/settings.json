@@ -1,0 +1,7 @@
+{
+  "notificationRecipientEmail": "deepetservices1@gmail.com",
+  "senderDisplayName": "DeePets Notifications",
+  "senderEmail": "contact@deepetservices.com",
+  "enableEmailNotifications": true,
+  "googleScriptWebhookUrl": ""
+}

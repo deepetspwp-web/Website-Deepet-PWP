@@ -2,18 +2,41 @@ import { NextResponse } from 'next/server';
 import nodemailer from 'nodemailer';
 import { GoogleSpreadsheet } from 'google-spreadsheet';
 import { JWT } from 'google-auth-library';
+import { addLead, getSettings } from '@/lib/leadsStore';
 
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { name, phone, email, message, petType, pet, service, city, pincode, date, timeSlot, source, captchaToken, utm_source, utm_medium, utm_campaign } = body;
-    const resolvedPetType = petType || pet || '';
+    const {
+      name,
+      phone,
+      email,
+      message,
+      petType,
+      pet,
+      service,
+      category,
+      price,
+      city,
+      pincode,
+      date,
+      timeSlot,
+      source = 'Website Form',
+      captchaToken,
+      utm_source,
+      utm_medium,
+      utm_campaign
+    } = body;
 
-    console.log('Received booking request from:', source, { name, phone });
+    const resolvedPetType = (petType || pet || 'Dog').charAt(0).toUpperCase() + (petType || pet || 'Dog').slice(1);
+    const isContactForm = source.toLowerCase().includes('contact');
+    const leadType = isContactForm ? 'contact' : 'consultation';
+
+    console.log(`Received ${leadType} request from: ${source}`, { name, phone });
 
     // 1. Basic Validation
     if (!name || !phone) {
-      return NextResponse.json({ error: 'Name and phone are required' }, { status: 400 });
+      return NextResponse.json({ error: 'Name and phone number are required' }, { status: 400 });
     }
 
     // 2. Input Sanitization & Spam Detection
@@ -23,13 +46,13 @@ export async function POST(req: Request) {
       /UPDATE.*SET/i,
       /DELETE.*FROM/i,
       /UNION.*SELECT/i,
-      /WHERE\s+\d+=\d+/i, // Common SQLi pattern like 2559=2559
+      /WHERE\s+\d+=\d+/i,
       /AND\s+\d+=\d+/i,
       /OR\s+\d+=\d+/i,
       /WAITFOR\s+DELAY/i,
-      /--/i, // SQL comment
-      /\/\*/i, // SQL comment
-      /GTID_SUBSET/i, // Specifically seen in the spam image
+      /--/i,
+      /\/\*/i,
+      /GTID_SUBSET/i,
       /CONCAT\(/i,
       /ELT\(/i
     ];
@@ -39,7 +62,7 @@ export async function POST(req: Request) {
       return suspiciousPatterns.some(pattern => pattern.test(text));
     };
 
-    if (checkSpam(name) || checkSpam(message) || checkSpam(phone)) {
+    if (checkSpam(name) || checkSpam(message || '') || checkSpam(phone)) {
       console.warn('Spam/Malicious pattern detected:', { name, phone, message });
       return NextResponse.json({ error: 'Invalid input detected' }, { status: 400 });
     }
@@ -47,203 +70,192 @@ export async function POST(req: Request) {
     // 3. Verify reCAPTCHA
     if (process.env.NODE_ENV === 'development') {
       console.log('Skipping reCAPTCHA verification in development environment');
-    } else {
-      if (!captchaToken) {
-        console.error('reCAPTCHA token is missing');
-        return NextResponse.json({ error: 'reCAPTCHA token is missing' }, { status: 400 });
-      }
-
-      if (!process.env.RECAPTCHA_SECRET_KEY) {
-        console.error('RECAPTCHA_SECRET_KEY is not defined');
-        return NextResponse.json({ error: 'Server configuration error (missing keys)' }, { status: 500 });
-      }
-
+    } else if (process.env.RECAPTCHA_SECRET_KEY) {
       try {
-        // Standard POST verification for reCAPTCHA v3
-        const verifyResponse = await fetch('https://www.google.com/recaptcha/api/siteverify', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-          },
-          body: `secret=${process.env.RECAPTCHA_SECRET_KEY}&response=${captchaToken}`,
-        });
-
-        const verifyData = await verifyResponse.json();
-
-        if (!verifyData.success || (verifyData.score !== undefined && verifyData.score < 0.5)) {
-          console.error('reCAPTCHA verification failed:', verifyData['error-codes'], 'Score:', verifyData.score);
-          return NextResponse.json({ 
-            error: 'reCAPTCHA verification failed. Please try again or contact us directly.',
-            details: verifyData['error-codes'] 
-          }, { status: 400 });
+        if (!captchaToken || captchaToken === 'dev-token') {
+          console.warn('Captcha token missing in production');
+        } else {
+          const recaptchaRes = await fetch(
+            `https://www.google.com/recaptcha/api/siteverify?secret=${process.env.RECAPTCHA_SECRET_KEY}&response=${captchaToken}`,
+            { method: 'POST' }
+          );
+          const recaptchaData = await recaptchaRes.json();
+          if (!recaptchaData.success || (recaptchaData.score !== undefined && recaptchaData.score < 0.4)) {
+            console.warn('reCAPTCHA failed or low score:', recaptchaData);
+            return NextResponse.json({ error: 'Verification failed. Please try again.' }, { status: 400 });
+          }
         }
-      } catch (vError) {
-        console.error('Error verifying reCAPTCHA:', vError);
-        return NextResponse.json({ error: 'Failed to verify reCAPTCHA' }, { status: 500 });
+      } catch (captchaErr) {
+        console.error('reCAPTCHA verification error:', captchaErr);
       }
     }
 
-    // 4. Send Email via SMTP
-    if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASS) {
-      console.error('SMTP environment variables are not fully configured');
-      return NextResponse.json({ error: 'Server configuration error (mail)' }, { status: 500 });
-    }
+    // 4. Resolve Category and Price
+    const resolvedCategory = category || (isContactForm ? 'General Enquiry' : 'Preventive Wellness');
+    const resolvedService = service || (isContactForm ? 'Contact Inquiry' : 'General Consultation');
+    const resolvedPrice = price || (isContactForm ? '0' : '999');
+    const resolvedDateMessage = [
+      date ? `Date: ${date}` : '',
+      timeSlot ? `Slot: ${timeSlot}` : '',
+      message ? message : ''
+    ].filter(Boolean).join(' | ') || (date ? `Preferred date: ${date}` : 'Consultation request');
 
-    const transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: Number(process.env.SMTP_PORT) || 587,
-      secure: false, // Use STARTTLS
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
-      },
+    // 5. Save to Admin Local Leads Store & Generate Unique ID: DEPWEB00<N>
+    const newLead = await addLead({
+      type: leadType,
+      name,
+      phone,
+      email: email || '',
+      petType: resolvedPetType,
+      category: resolvedCategory,
+      service: resolvedService,
+      price: resolvedPrice,
+      city: city || 'Delhi NCR',
+      pincode: pincode || '',
+      date: date || '',
+      timeSlot: timeSlot || '',
+      message: message || '',
+      source,
+      status: 'Pending',
+      utm_source: utm_source || '',
+      utm_medium: utm_medium || '',
+      utm_campaign: utm_campaign || '',
     });
 
-    const subject = `New Lead from ${source}`;
-    const htmlContent = `
-      <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 10px;">
-        <h2 style="color: #003451; border-bottom: 2px solid #bfe37f; padding-bottom: 10px;">New Pet Service Inquiry</h2>
-        <div style="margin-top: 20px;">
-          <p><strong>Source:</strong> ${source}</p>
-          <p><strong>Name:</strong> ${name}</p>
-          <p><strong>Phone:</strong> ${phone}</p>
-          ${email ? `<p><strong>Email:</strong> ${email}</p>` : ''}
-          ${city ? `<p><strong>City:</strong> ${city}</p>` : ''}
-          ${pincode ? `<p><strong>Pincode:</strong> ${pincode}</p>` : ''}
-          ${resolvedPetType ? `<p><strong>Pet Type:</strong> ${resolvedPetType}</p>` : ''}
-          ${service ? `<p><strong>Service:</strong> ${service}</p>` : ''}
-          ${date ? `<p><strong>Preferred Date:</strong> ${date}</p>` : ''}
-          ${timeSlot ? `<p><strong>Preferred Slot:</strong> ${timeSlot}</p>` : ''}
-          ${utm_source ? `<p><strong>UTM Source:</strong> ${utm_source}</p>` : ''}
-          ${utm_medium ? `<p><strong>UTM Medium:</strong> ${utm_medium}</p>` : ''}
-          ${utm_campaign ? `<p><strong>UTM Campaign:</strong> ${utm_campaign}</p>` : ''}
-          ${message ? `
-            <div style="margin-top: 20px; padding: 15px; background: #f9f9f9; border-left: 4px solid #bfe37f;">
-              <strong>Message:</strong><br/>
-              ${message.replace(/\n/g, '<br/>')}
-            </div>
-          ` : ''}
-        </div>
-        <div style="margin-top: 30px; font-size: 12px; color: #888; text-align: center;">
-          This lead was verified by reCAPTCHA and screened for malicious content.
-        </div>
-      </div>
-    `;
+    const bookingId = newLead.code;
+    console.log(`Assigned Unique Booking Code: ${bookingId}`);
 
-    const mailOptions = {
-      from: `"Deepet Services" <${process.env.SMTP_USER}>`,
-      to: process.env.LEAD_RECIPIENT_EMAIL || 'deepetservices1@gmail.com',
-      subject: subject,
-      html: htmlContent,
-    };
+    // Load dynamic settings from Admin Panel
+    const settings = await getSettings();
 
-    // 5. Save to Google Sheets
-    let googleSheetError: Error | null = null;
-    try {
-      // Option A: Apps Script Webhook (Prioritized if URL is provided)
-      if (process.env.GOOGLE_SCRIPT_WEBHOOK_URL) {
-        console.log('Sending to Apps Script Webhook:', process.env.GOOGLE_SCRIPT_WEBHOOK_URL);
-        const gsResponse = await fetch(process.env.GOOGLE_SCRIPT_WEBHOOK_URL, {
+    // 6. Save to Google Sheets (Apps Script Webhook matching Image 5: Columns A to K)
+    const webhookUrl = settings.googleScriptWebhookUrl || process.env.GOOGLE_SCRIPT_WEBHOOK_URL;
+    if (webhookUrl) {
+      try {
+        console.log(`Sending lead ${bookingId} to Google Sheet Webhook`);
+        await fetch(webhookUrl, {
           method: 'POST',
-          headers: { 
-            'Content-Type': 'application/json',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            'Accept': 'application/json',
-          },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            name, phone, email, message, petType: resolvedPetType, service, city, pincode, date, timeSlot, source,
-            utm_source: utm_source || '', utm_medium: utm_medium || '', utm_campaign: utm_campaign || '',
-            timestamp: new Date().toLocaleString(),
+            code: bookingId,
+            bookingId: bookingId,
+            name,
+            phone,
+            petType: resolvedPetType,
+            category: resolvedCategory,
+            service: resolvedService,
+            price: resolvedPrice,
+            city: city || 'Delhi NCR',
+            pincode: pincode || '',
+            message: resolvedDateMessage,
+            date: date || '',
+            timestamp: newLead.timestamp,
+            utm_source: utm_source || '',
+            utm_medium: utm_medium || '',
+            utm_campaign: utm_campaign || '',
           }),
-          redirect: 'follow', // Ensure we follow redirects
+          redirect: 'follow',
         });
-        
-        console.log('Apps Script Status:', gsResponse.status);
-        if (!gsResponse.ok) {
-          const errorText = await gsResponse.text();
-          console.error('Apps Script Error Response:', errorText);
-          throw new Error(`Status ${gsResponse.status}: ${errorText.substring(0, 200)}...`);
-        }
-        console.log('Apps Script Webhook success');
-      } 
-      // Option B: Service Account (Checking for non-placeholder values)
-      else if (
-        process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL && !process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL.includes('YOUR_') &&
-        process.env.GOOGLE_PRIVATE_KEY && !process.env.GOOGLE_PRIVATE_KEY.includes('YOUR_') &&
-        process.env.GOOGLE_SHEET_ID && !process.env.GOOGLE_SHEET_ID.includes('YOUR_')
-      ) {
-        console.log('Using Service Account method');
+        console.log(`Google Sheet Webhook success for ${bookingId}`);
+      } catch (webhookErr) {
+        console.error('Google Sheet Webhook sync error:', webhookErr);
+      }
+    } else if (
+      process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL &&
+      process.env.GOOGLE_PRIVATE_KEY &&
+      process.env.GOOGLE_SHEET_ID &&
+      !process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL.includes('YOUR_')
+    ) {
+      try {
         const serviceAccountAuth = new JWT({
           email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
           key: process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n'),
           scopes: ['https://www.googleapis.com/auth/spreadsheets'],
         });
-
         const doc = new GoogleSpreadsheet(process.env.GOOGLE_SHEET_ID, serviceAccountAuth);
         await doc.loadInfo();
         const sheet = doc.sheetsByIndex[0];
-
         await sheet.addRow({
-          'Name': name,
-          'Phone': phone,
-          'Email': email || '',
-          'Message': message || '',
+          'Consultation Code': bookingId,
+          'Customer Name': name,
+          'Phone Number': phone,
           'Pet Type': resolvedPetType,
-          'Service': service || '',
+          'Category': resolvedCategory,
+          'Service / Package': resolvedService,
+          'Price (₹)': resolvedPrice,
           'City': city || '',
           'Pincode': pincode || '',
-          'Date': date || '',
-          'Time Slot': timeSlot || '',
-          'Source': source || '',
-          'UTM Source': utm_source || '',
-          'UTM Medium': utm_medium || '',
-          'UTM Campaign': utm_campaign || '',
-          'Timestamp': new Date().toLocaleString(),
+          'Message / Preferred Date': resolvedDateMessage,
+          'Submission Timestamp': newLead.timestamp,
         });
-      } else {
-        console.warn('No valid Google Sheets configuration found');
+      } catch (gsErr) {
+        console.error('Google Sheets service account error:', gsErr);
       }
-    } catch (gsError) {
-      const err = gsError instanceof Error ? gsError : new Error(String(gsError));
-      console.error('Error saving to Google Sheets:', err.message);
-      googleSheetError = err;
     }
 
-    // 6. Send email (waiting for completion)
-    let emailError: Error | null = null;
-    try {
-      await transporter.sendMail(mailOptions);
-      console.log('Email sent successfully');
-    } catch (mailErr) {
-      const err = mailErr instanceof Error ? mailErr : new Error(String(mailErr));
-      console.error('SMTP Error:', err.message);
-      emailError = err;
+    // 7. Send Email Notification (if enabled)
+    if (settings.enableEmailNotifications && process.env.SMTP_USER && process.env.SMTP_PASS) {
+      try {
+        const recipientEmail = settings.notificationRecipientEmail || 'deepetservices1@gmail.com';
+        const senderName = settings.senderDisplayName || 'DeePets Notifications';
+
+        const transporter = nodemailer.createTransport({
+          service: 'gmail',
+          auth: {
+            user: process.env.SMTP_USER,
+            pass: process.env.SMTP_PASS,
+          },
+        });
+
+        await transporter.sendMail({
+          from: `"${senderName}" <${process.env.SMTP_USER}>`,
+          to: recipientEmail,
+          subject: `🐾 New Booking [${bookingId}] from ${name} (${city || 'Delhi NCR'})`,
+          html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 16px;">
+              <div style="background: #003451; color: white; padding: 16px 20px; border-radius: 12px; margin-bottom: 20px;">
+                <h2 style="margin: 0; font-size: 20px;">New Consultation Request: ${bookingId}</h2>
+                <p style="margin: 4px 0 0; font-size: 13px; color: #bfe37f;">Source: ${source}</p>
+              </div>
+
+              <table style="width: 100%; border-collapse: collapse; font-size: 14px; color: #334155;">
+                <tr><td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9; font-weight: bold; width: 140px;">Booking Code:</td><td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9; color: #65a30d; font-weight: bold;">${bookingId}</td></tr>
+                <tr><td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9; font-weight: bold;">Customer Name:</td><td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9;">${name}</td></tr>
+                <tr><td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9; font-weight: bold;">Phone Number:</td><td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9;"><a href="tel:${phone}" style="color: #0284c7; text-decoration: none;">${phone}</a></td></tr>
+                ${email ? `<tr><td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9; font-weight: bold;">Email:</td><td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9;">${email}</td></tr>` : ''}
+                <tr><td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9; font-weight: bold;">Pet Type:</td><td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9;">${resolvedPetType}</td></tr>
+                <tr><td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9; font-weight: bold;">Category:</td><td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9;">${resolvedCategory}</td></tr>
+                <tr><td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9; font-weight: bold;">Service / Package:</td><td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9;">${resolvedService}</td></tr>
+                <tr><td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9; font-weight: bold;">City / Area:</td><td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9;">${city || 'Delhi NCR'} ${pincode ? `(${pincode})` : ''}</td></tr>
+                ${date ? `<tr><td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9; font-weight: bold;">Preferred Date:</td><td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9;">${date} ${timeSlot ? `(${timeSlot})` : ''}</td></tr>` : ''}
+                ${message ? `<tr><td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9; font-weight: bold; vertical-align: top;">Notes/Message:</td><td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9;">${message}</td></tr>` : ''}
+              </table>
+
+              <div style="margin-top: 24px; padding-top: 16px; border-top: 1px solid #e2e8f0; text-align: center; font-size: 12px; color: #94a3b8;">
+                View and manage this lead in your <a href="https://deepetservices.com/admin" style="color: #003451; font-weight: bold;">DeePet Admin Panel</a>
+              </div>
+            </div>
+          `,
+        });
+        console.log(`Email notification sent to ${recipientEmail}`);
+      } catch (mailErr) {
+        console.error('SMTP notification error:', mailErr);
+      }
     }
 
-    // 7. Determine Final Response
-    if (googleSheetError && emailError) {
-      console.error('Both lead capture methods failed');
-      return NextResponse.json({
-        error: 'Failed to process lead. Please contact us directly.'
-      }, { status: 500 });
-    }
-
-    if (googleSheetError || emailError) {
-      console.warn('Lead partially captured', {
-        googleSheetError: googleSheetError?.message,
-        emailError: emailError?.message,
-      });
-      return NextResponse.json({
-        message: 'Lead captured',
-      }, { status: 200 });
-    }
-
-    return NextResponse.json({ message: 'Lead captured successfully' }, { status: 200 });
-  } catch (outerError) {
-    const err = outerError instanceof Error ? outerError : new Error(String(outerError));
-    console.error('CRITICAL Error in route handler:', err.message, err.stack);
+    // 8. Always return the unique Booking ID and Code so the frontend can redirect to /thank-you?bookingId=DEPWEB00n
     return NextResponse.json({
-      error: 'Server error. Please try again.'
+      success: true,
+      bookingId,
+      code: bookingId,
+      message: 'Consultation booking captured successfully!',
+    }, { status: 200 });
+
+  } catch (error) {
+    const err = error instanceof Error ? error : new Error(String(error));
+    console.error('CRITICAL Error in send-email route:', err.message);
+    return NextResponse.json({
+      error: 'Failed to process booking. Please try again or call us directly.',
     }, { status: 500 });
   }
 }
