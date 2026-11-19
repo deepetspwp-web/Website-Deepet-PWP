@@ -2,11 +2,11 @@ import { Navbar } from "@/components/layout/Navbar";
 import { Footer } from "@/components/layout/Footer";
 import { MobileStickyCTA } from "@/components/layout/MobileStickyCTA";
 import { PostCard } from "@/components/blog/PostCard";
-import { getPosts } from "@/lib/wp";
+import { getLocalPosts } from "@/lib/blog";
 import { SeoHead } from "@/components/seo/SeoHead";
 
 export default async function BlogPage() {
-    const posts = await getPosts(24);
+    const posts = getLocalPosts();
 
     return (
         <main className="min-h-screen">

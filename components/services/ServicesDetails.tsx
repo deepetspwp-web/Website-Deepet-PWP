@@ -50,7 +50,7 @@ export function ServicesDetails() {
                                 <div className="absolute top-0 right-0 w-32 h-32 bg-[#bfe37f] rounded-full -translate-y-1/2 translate-x-1/2 opacity-20 group-hover:scale-150 transition-transform duration-700" />
                                 <div className="space-y-2 text-center md:text-left">
                                     <p className="text-[#bfe37f] font-black uppercase tracking-[0.2em] text-xs">Home Consultation Offer</p>
-                                    <h3 className="text-4xl font-serif font-bold">Starting from ₹499</h3>
+                                    <h3 className="text-4xl font-serif font-bold">Starting from ₹199</h3>
                                     <p className="text-white/50 text-sm italic">* All travel included - No hidden charges!</p>
                                 </div>
                                 <div className="w-px h-16 bg-white/10 hidden md:block" />

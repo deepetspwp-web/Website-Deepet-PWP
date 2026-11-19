@@ -6,10 +6,14 @@ import type { Metadata } from "next";
 import { Navbar } from "@/components/layout/Navbar";
 import { Footer } from "@/components/layout/Footer";
 import { MobileStickyCTA } from "@/components/layout/MobileStickyCTA";
-import { getPostBySlug } from "@/lib/wp";
+import { getLocalPostBySlug, getLocalPostSlugs } from "@/lib/blog";
 import { SeoHead } from "@/components/seo/SeoHead";
 
 type Params = { slug: string };
+
+export function generateStaticParams(): Params[] {
+    return getLocalPostSlugs().map((slug) => ({ slug }));
+}
 
 function formatDate(dateString: string): string {
     try {
@@ -29,8 +33,16 @@ export async function generateMetadata({
     params: Promise<Params>;
 }): Promise<Metadata> {
     const { slug } = await params;
-    const post = await getPostBySlug(slug);
+    const post = getLocalPostBySlug(slug);
     if (!post) return { title: "Post Not Found" };
+    // SeoHead below still pulls SEO from WordPress; these stored values are
+    // the fallback when WordPress can't be reached.
+    if (post.seo?.title || post.seo?.description) {
+        return {
+            title: post.seo?.title || post.title,
+            description: post.seo?.description || undefined,
+        };
+    }
 
     // SEO (title/description/OG/canonical) is supplied by the TeqzWP SEO plugin
     // via <SeoHead> rendered in the page body.
@@ -43,7 +55,7 @@ export default async function BlogPostPage({
     params: Promise<Params>;
 }) {
     const { slug } = await params;
-    const post = await getPostBySlug(slug);
+    const post = getLocalPostBySlug(slug);
 
     if (!post) notFound();
 
