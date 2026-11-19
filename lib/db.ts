@@ -1,99 +1,48 @@
-import { Pool, QueryResult, QueryResultRow } from 'pg';
-import dns from 'dns';
+import { neon, NeonQueryFunction } from '@neondatabase/serverless';
 
-// DNS cache map for instant 0ms lookups
-const dnsCache = new Map<string, string[]>();
-
-// Pre-populate Neon pooler IPs so zero DNS lookups are needed
-dnsCache.set('ep-silent-leaf-bewfpm0c-pooler.c-9.us-east-2.aws.neon.tech', [
-    '77.113.7.222',
-    '3.147.219.177',
-    '77.113.120.60',
-]);
-
-// Patch dns.lookup to use cache and public DNS (8.8.8.8, 1.1.1.1)
-if (typeof dns.lookup === 'function') {
-    const originalLookup = dns.lookup;
-    (dns as any).lookup = function (hostname: string, options: any, callback: any) {
-        if (typeof options === 'function') {
-            callback = options;
-            options = {};
-        }
-
-        // Return from memory cache immediately if present
-        if (dnsCache.has(hostname)) {
-            const cached = dnsCache.get(hostname)!;
-            if (options && options.all) {
-                return callback(null, cached.map((a) => ({ address: a, family: 4 })), 4);
-            }
-            return callback(null, cached[0], 4);
-        }
-
-        // Fast resolve using public DNS
-        const resolver = new dns.Resolver();
-        resolver.setServers(['8.8.8.8', '1.1.1.1']);
-        resolver.resolve4(hostname, (resErr, addresses) => {
-            if (!resErr && addresses && addresses.length > 0) {
-                dnsCache.set(hostname, addresses);
-                if (options && options.all) {
-                    return callback(null, addresses.map((a) => ({ address: a, family: 4 })), 4);
-                }
-                return callback(null, addresses[0], 4);
-            }
-            originalLookup(hostname, options, callback);
-        });
-    };
+// Neon's HTTP driver: each query is a single HTTPS request, with no TCP/TLS/auth
+// handshake per cold start (the old pg Pool took ~3-4s to connect on a cold function).
+export interface QueryResult<T> {
+    rows: T[];
+    rowCount: number | null;
 }
 
-const DEFAULT_DATABASE_URL =
-    process.env.DATABASE_URL ||
-    'postgresql://neondb_owner:npg_Pfls4gviRSk1@ep-silent-leaf-bewfpm0c-pooler.c-9.us-east-2.aws.neon.tech/neondb?sslmode=require';
+let sql: NeonQueryFunction<false, true> | null = null;
 
-// Global singleton pool across hot reloads in Next.js development
-declare global {
-    var _pgPool: Pool | undefined;
-    var _keepAliveInterval: NodeJS.Timeout | undefined;
-}
-
-let pool: Pool;
-
-if (!global._pgPool) {
-    global._pgPool = new Pool({
-        connectionString: DEFAULT_DATABASE_URL,
-        ssl: { rejectUnauthorized: false },
-        max: 20,
-        idleTimeoutMillis: 60000,
-        connectionTimeoutMillis: 5000,
-        keepAlive: true,
-        keepAliveInitialDelayMillis: 5000,
-    });
-}
-pool = global._pgPool;
-
-// Keep-alive heartbeat: keeps the TLS connection hot so queries execute in <300ms instead of 4s cold start
-if (!global._keepAliveInterval) {
-    global._keepAliveInterval = setInterval(() => {
-        pool.query('SELECT 1').catch(() => {});
-    }, 25000);
-    if (global._keepAliveInterval.unref) {
-        global._keepAliveInterval.unref();
+function getSql(): NeonQueryFunction<false, true> {
+    if (!sql) {
+        const url = process.env.DATABASE_URL;
+        if (!url) throw new Error('DATABASE_URL is not set');
+        sql = neon(url, { fullResults: true });
     }
+    return sql;
 }
 
-export async function query<T extends QueryResultRow = any>(
-    text: string,
-    params?: any[]
-): Promise<QueryResult<T>> {
-    return pool.query<T>(text, params);
+async function runQuery<T = any>(text: string, params: any[] = []): Promise<QueryResult<T>> {
+    const res = await getSql().query(text, params);
+    return { rows: res.rows as T[], rowCount: res.rowCount };
+}
+
+export async function query<T = any>(text: string, params?: any[]): Promise<QueryResult<T>> {
+    try {
+        return await runQuery<T>(text, params);
+    } catch (err: any) {
+        // 42P01 = table does not exist: create the tables once, then retry.
+        if (err?.code === '42P01' && !tablesInitialized) {
+            await createTables();
+            return runQuery<T>(text, params);
+        }
+        throw err;
+    }
 }
 
 let tablesInitialized = false;
 
-export async function ensureTables(): Promise<void> {
+async function createTables(): Promise<void> {
     if (tablesInitialized) return;
 
     try {
-        await query(`
+        await runQuery(`
             CREATE TABLE IF NOT EXISTS leads (
                 id VARCHAR(64) PRIMARY KEY,
                 code VARCHAR(64) UNIQUE NOT NULL,
@@ -121,7 +70,7 @@ export async function ensureTables(): Promise<void> {
             );
         `);
 
-        await query(`
+        await runQuery(`
             CREATE TABLE IF NOT EXISTS admin_settings (
                 id VARCHAR(32) PRIMARY KEY DEFAULT 'default',
                 notification_recipient_email VARCHAR(255) DEFAULT 'deepetservices1@gmail.com',
@@ -141,7 +90,6 @@ export async function ensureTables(): Promise<void> {
     }
 }
 
-// Background pre-warming of connection pool
-ensureTables().catch(() => {});
-
-export default pool;
+// Tables are created on demand by query() if they are missing, so no extra
+// round trips are spent on CREATE TABLE IF NOT EXISTS before each request.
+export async function ensureTables(): Promise<void> {}

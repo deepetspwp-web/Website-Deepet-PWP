@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+import { NextResponse, after } from 'next/server';
 import { GoogleSpreadsheet } from 'google-spreadsheet';
 import { JWT } from 'google-auth-library';
 import { addLead, getSettings } from '@/lib/leadsStore';
@@ -110,7 +110,7 @@ export async function POST(req: Request) {
 
     // 6. Asynchronous Background Sync (Google Sheets & Email Notifications)
     // Runs in the background so the customer is redirected to the Thank You page in under 300ms!
-    (async () => {
+    after(async () => {
       try {
         const settings = await getSettings();
 
@@ -248,7 +248,7 @@ export async function POST(req: Request) {
       } catch (bgErr) {
         console.error('[Background] Execution error:', bgErr);
       }
-    })();
+    });
 
     return response;
 
