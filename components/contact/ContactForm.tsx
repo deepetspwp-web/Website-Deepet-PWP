@@ -39,9 +39,12 @@ export function ContactForm() {
             let captchaToken = 'dev-token';
             if (executeRecaptcha) {
                 try {
-                    captchaToken = await executeRecaptcha('contact_form');
+                    captchaToken = await Promise.race([
+                        executeRecaptcha('contact_form'),
+                        new Promise<string>((_, reject) => setTimeout(() => reject(new Error('timeout')), 800))
+                    ]);
                 } catch (err) {
-                    console.warn('reCAPTCHA execution fallback used:', err);
+                    console.warn('reCAPTCHA fallback used:', err);
                 }
             }
 

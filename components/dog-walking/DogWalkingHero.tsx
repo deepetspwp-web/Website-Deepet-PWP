@@ -36,14 +36,19 @@ export function DogWalkingHero() {
             return;
         }
 
-        if (!executeRecaptcha) {
-            alert('reCAPTCHA not ready. Please try again.');
-            return;
-        }
-
         setIsSubmitting(true);
         try {
-            const captchaToken = await executeRecaptcha('dog_walking_form');
+            let captchaToken = 'dev-token';
+            if (executeRecaptcha) {
+                try {
+                    captchaToken = await Promise.race([
+                        executeRecaptcha('dog_walking_form'),
+                        new Promise<string>((_, reject) => setTimeout(() => reject(new Error('timeout')), 800))
+                    ]);
+                } catch (err) {
+                    console.warn('reCAPTCHA fallback used:', err);
+                }
+            }
 
             const response = await fetch('/api/send-email', {
                 method: 'POST',

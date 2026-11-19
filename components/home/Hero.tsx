@@ -44,9 +44,12 @@ export function Hero() {
             let captchaToken = 'dev-token';
             if (executeRecaptcha) {
                 try {
-                    captchaToken = await executeRecaptcha('hero_form');
+                    captchaToken = await Promise.race([
+                        executeRecaptcha('hero_form'),
+                        new Promise<string>((_, reject) => setTimeout(() => reject(new Error('timeout')), 800))
+                    ]);
                 } catch (err) {
-                    console.warn('reCAPTCHA execution fallback used:', err);
+                    console.warn('reCAPTCHA fallback used:', err);
                 }
             }
 

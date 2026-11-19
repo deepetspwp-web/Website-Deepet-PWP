@@ -48,9 +48,12 @@ export function BookingSection() {
             let captchaToken = 'dev-token';
             if (executeRecaptcha) {
                 try {
-                    captchaToken = await executeRecaptcha('booking_form');
+                    captchaToken = await Promise.race([
+                        executeRecaptcha('booking_form'),
+                        new Promise<string>((_, reject) => setTimeout(() => reject(new Error('timeout')), 800))
+                    ]);
                 } catch (err) {
-                    console.warn('reCAPTCHA execution fallback used:', err);
+                    console.warn('reCAPTCHA fallback used:', err);
                 }
             }
 

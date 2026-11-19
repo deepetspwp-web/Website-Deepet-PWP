@@ -51,6 +51,11 @@ const DEFAULT_SETTINGS: AdminSettings = {
     adminPassword: '1',
 };
 
+// In-memory cache for settings so form submissions don't query DB
+let cachedSettings: AdminSettings | null = null;
+let settingsCacheTime = 0;
+const SETTINGS_CACHE_TTL = 30000; // 30 seconds
+
 // -------------------------------------------------------------
 // LOCAL FALLBACK HELPERS
 // -------------------------------------------------------------
@@ -128,67 +133,66 @@ export async function addLead(
     });
     const status = newLeadData.status || 'Pending';
 
+    // Fast Single-Query Insert: calculates next sequential number and inserts in 1 round trip
     try {
         await ensureTables();
 
-        // Get max sequential number from DB
-        const maxRes = await query(`SELECT COALESCE(MAX(number), 0) as max_num FROM leads`);
-        const maxNumber = parseInt(maxRes.rows[0]?.max_num || '0', 10);
-        const nextNumber = maxNumber > 0 ? maxNumber + 1 : 1;
-        const code = `DEPWEB00${nextNumber}`;
-
-        await query(
-            `
+        const insertQuery = `
+            WITH next_seq AS (
+                SELECT COALESCE(MAX(number), 0) + 1 AS num FROM leads
+            )
             INSERT INTO leads (
                 id, code, number, type, name, phone, email, pet_type, category, service,
                 price, city, pincode, date, time_slot, message, source, status, timestamp,
                 utm_source, utm_medium, utm_campaign
-            ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-                $11, $12, $13, $14, $15, $16, $17, $18, $19,
-                $20, $21, $22
             )
-            `,
-            [
-                code,
-                code,
-                nextNumber,
-                newLeadData.type,
-                newLeadData.name,
-                newLeadData.phone,
-                newLeadData.email || '',
-                newLeadData.petType || 'Dog',
-                newLeadData.category || '',
-                newLeadData.service || '',
-                String(newLeadData.price || '0'),
-                newLeadData.city || '',
-                newLeadData.pincode || '',
-                newLeadData.date || '',
-                newLeadData.timeSlot || '',
-                newLeadData.message || '',
-                newLeadData.source || 'Website Form',
-                status,
-                formattedTimestamp,
-                newLeadData.utm_source || '',
-                newLeadData.utm_medium || '',
-                newLeadData.utm_campaign || '',
-            ]
-        );
+            SELECT 
+                'DEPWEB00' || num,
+                'DEPWEB00' || num,
+                num,
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+                $11, $12, $13, $14, $15, $16, $17, $18, $19
+            FROM next_seq
+            RETURNING id, code, number, timestamp;
+        `;
 
+        const res = await query(insertQuery, [
+            newLeadData.type,
+            newLeadData.name,
+            newLeadData.phone,
+            newLeadData.email || '',
+            newLeadData.petType || 'Dog',
+            newLeadData.category || '',
+            newLeadData.service || '',
+            String(newLeadData.price || '0'),
+            newLeadData.city || '',
+            newLeadData.pincode || '',
+            newLeadData.date || '',
+            newLeadData.timeSlot || '',
+            newLeadData.message || '',
+            newLeadData.source || 'Website Form',
+            status,
+            formattedTimestamp,
+            newLeadData.utm_source || '',
+            newLeadData.utm_medium || '',
+            newLeadData.utm_campaign || '',
+        ]);
+
+        const row = res.rows[0];
         const lead: Lead = {
-            id: code,
-            code,
-            number: nextNumber,
+            id: row?.id || `DEPWEB001`,
+            code: row?.code || `DEPWEB001`,
+            number: row?.number || 1,
             status,
             timestamp: formattedTimestamp,
             ...newLeadData,
         };
 
-        // Also save to local backup
+        // Asynchronous background backup to local disk
         getLocalLeads().then((localList) => {
             localList.unshift(lead);
             saveLocalLeads(localList);
-        });
+        }).catch(() => {});
 
         return lead;
     } catch (dbErr) {
@@ -236,7 +240,6 @@ export async function updateLeadStatus(id: string, status: Lead['status']): Prom
         console.error('Neon DB status update error:', err);
     }
 
-    // Local fallback update
     const localList = await getLocalLeads();
     const idx = localList.findIndex((l) => l.id === id || l.code === id);
     if (idx !== -1) {
@@ -266,6 +269,11 @@ export async function deleteLead(id: string): Promise<boolean> {
 }
 
 export async function getSettings(): Promise<AdminSettings> {
+    // Fast in-memory cache check (0ms response)
+    if (cachedSettings && Date.now() - settingsCacheTime < SETTINGS_CACHE_TTL) {
+        return cachedSettings;
+    }
+
     try {
         await ensureTables();
         const res = await query(`
@@ -282,18 +290,28 @@ export async function getSettings(): Promise<AdminSettings> {
         `);
 
         if (res.rows.length > 0) {
-            return { ...DEFAULT_SETTINGS, ...res.rows[0] };
+            const fresh = { ...DEFAULT_SETTINGS, ...res.rows[0] };
+            cachedSettings = fresh;
+            settingsCacheTime = Date.now();
+            return fresh;
         }
     } catch (err) {
         console.error('Neon DB getSettings error:', err);
     }
 
-    return getLocalSettings();
+    const fallback = await getLocalSettings();
+    cachedSettings = fallback;
+    settingsCacheTime = Date.now();
+    return fallback;
 }
 
 export async function saveSettings(newSettings: Partial<AdminSettings>): Promise<AdminSettings> {
     const current = await getSettings();
     const updated: AdminSettings = { ...current, ...newSettings };
+
+    // Update memory cache immediately
+    cachedSettings = updated;
+    settingsCacheTime = Date.now();
 
     try {
         await ensureTables();
