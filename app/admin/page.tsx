@@ -488,7 +488,7 @@ export default function AdminDashboardPage() {
                                     required
                                     value={loginUser}
                                     onChange={(e) => setLoginUser(e.target.value)}
-                                    placeholder="Enter username (default: 1)"
+                                    placeholder="Enter username"
                                     className="w-full pl-9 pr-3 py-2 text-sm bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent transition-all"
                                 />
                             </div>
@@ -505,7 +505,7 @@ export default function AdminDashboardPage() {
                                     required
                                     value={loginPass}
                                     onChange={(e) => setLoginPass(e.target.value)}
-                                    placeholder="Enter password (default: 1)"
+                                    placeholder="Enter password"
                                     className="w-full pl-9 pr-3 py-2 text-sm bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent transition-all"
                                 />
                             </div>
@@ -519,12 +519,6 @@ export default function AdminDashboardPage() {
                             {isLoggingIn ? 'Signing in...' : 'Sign In'}
                         </button>
                     </form>
-
-                    <div className="mt-6 pt-4 border-t border-slate-100 text-center">
-                        <p className="text-[11px] text-slate-400">
-                            Default ID: <code className="bg-slate-100 px-1.5 py-0.5 rounded font-mono text-slate-600">1</code> / Password: <code className="bg-slate-100 px-1.5 py-0.5 rounded font-mono text-slate-600">1</code>
-                        </p>
-                    </div>
                 </div>
             </div>
         );
@@ -1154,7 +1148,7 @@ export default function AdminDashboardPage() {
                                     required
                                     value={currentPassword}
                                     onChange={(e) => setCurrentPassword(e.target.value)}
-                                    placeholder="Enter current password (default: 1)"
+                                    placeholder="Enter current password"
                                     className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-md focus:outline-none focus:ring-1 focus:ring-slate-900"
                                 />
                             </div>
@@ -1168,7 +1162,7 @@ export default function AdminDashboardPage() {
                                     required
                                     value={newUsername}
                                     onChange={(e) => setNewUsername(e.target.value)}
-                                    placeholder="Username (default: 1)"
+                                    placeholder="Username"
                                     className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-md focus:outline-none focus:ring-1 focus:ring-slate-900"
                                 />
                             </div>
