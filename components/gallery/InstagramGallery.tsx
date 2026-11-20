@@ -4,10 +4,10 @@ import Image from "next/image";
 import { motion } from "framer-motion";
 import { Instagram, ExternalLink } from "lucide-react";
 import { useThemeOptions } from "@/components/providers/ThemeOptionsProvider";
-import { findSocial } from "@/lib/wp/format";
-import type { WPMedia } from "@/lib/wp/types";
+import { findSocial } from "@/lib/cms/format";
+import type { MediaImage } from "@/lib/cms/types";
 
-export function InstagramGallery({ images }: { images: WPMedia[] }) {
+export function InstagramGallery({ images }: { images: MediaImage[] }) {
     const theme = useThemeOptions();
     const instagram = findSocial(theme?.socialMedia, "Instagram");
     const instagramUrl = instagram?.url;

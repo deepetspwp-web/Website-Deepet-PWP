@@ -2,8 +2,8 @@ import { notFound } from "next/navigation";
 import { Navbar } from "@/components/layout/Navbar";
 import { Footer } from "@/components/layout/Footer";
 import { MobileStickyCTA } from "@/components/layout/MobileStickyCTA";
-import { WPPageContent } from "@/components/wp/WPPageContent";
-import { getPageByUri } from "@/lib/wp";
+import { PageContent } from "@/components/cms/PageContent";
+import { getPageByUri } from "@/lib/cms";
 import { SeoHead } from "@/components/seo/SeoHead";
 
 export default async function PrivacyPolicyPage() {
@@ -15,7 +15,7 @@ export default async function PrivacyPolicyPage() {
             <SeoHead uri="privacy-policy" fallback={{ title: "Privacy Policy" }} />
             <Navbar />
             <div className="pt-12">
-                <WPPageContent page={page} />
+                <PageContent page={page} />
             </div>
             <Footer />
             <MobileStickyCTA />

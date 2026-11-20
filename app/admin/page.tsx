@@ -22,7 +22,12 @@ import {
     AlertCircle,
     Settings as SettingsIcon,
 } from 'lucide-react';
-import { Lead, AdminSettings } from '@/lib/leadsStore';
+import type { Lead, AdminSettings } from '@/lib/leadTypes';
+import { BlogManager } from '@/components/admin/BlogManager';
+import { GalleryManager } from '@/components/admin/GalleryManager';
+import { SiteSettingsForm } from '@/components/admin/SiteSettingsForm';
+import { PagesEditor } from '@/components/admin/PagesEditor';
+import { SeoManager } from '@/components/admin/SeoManager';
 
 const APPS_SCRIPT_CODE = `function doGet(e) {
   return ContentService.createTextOutput(JSON.stringify({
@@ -87,6 +92,18 @@ function doPost(e) {
   }
 }`;
 
+type AdminTab =
+    | 'consultations'
+    | 'contacts'
+    | 'blogs'
+    | 'gallery'
+    | 'site'
+    | 'pages'
+    | 'seo'
+    | 'email'
+    | 'sheets'
+    | 'security';
+
 export default function AdminDashboardPage() {
     // Auth state (Default credentials: 1 / 1)
     const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
@@ -103,8 +120,8 @@ export default function AdminDashboardPage() {
     const [passwordChangeStatus, setPasswordChangeStatus] = useState<string | null>(null);
     const [isChangingPassword, setIsChangingPassword] = useState(false);
 
-    // Navigation tabs: 'consultations' | 'contacts' | 'email' | 'sheets' | 'security'
-    const [activeTab, setActiveTab] = useState<'consultations' | 'contacts' | 'email' | 'sheets' | 'security'>('consultations');
+    // Navigation tabs
+    const [activeTab, setActiveTab] = useState<AdminTab>('consultations');
 
     // Leads & filter state
     const [leads, setLeads] = useState<Lead[]>([]);
@@ -129,7 +146,6 @@ export default function AdminDashboardPage() {
         enableEmailNotifications: true,
         googleScriptWebhookUrl: '',
         adminUsername: '1',
-        adminPassword: '1',
     });
     const [settingsSaved, setSettingsSaved] = useState(false);
     const [isSavingSettings, setIsSavingSettings] = useState(false);
@@ -141,15 +157,18 @@ export default function AdminDashboardPage() {
     const [isSendingTestWebhook, setIsSendingTestWebhook] = useState(false);
     const [copiedScript, setCopiedScript] = useState(false);
 
-    // Check existing session
+    // Check existing session (httpOnly cookie set by /api/admin/auth)
     useEffect(() => {
-        if (typeof window !== 'undefined') {
-            const loggedIn = sessionStorage.getItem('deepet_admin_auth');
-            if (loggedIn === 'true') {
-                setIsAuthenticated(true);
-            }
-            setAuthChecking(false);
-        }
+        fetch('/api/admin/auth')
+            .then((r) => r.json())
+            .then((d) => setIsAuthenticated(!!d.authenticated))
+            .catch(() => setIsAuthenticated(false))
+            .finally(() => setAuthChecking(false));
+
+        // Any admin API returning 401 (session expired) sends the user back to login.
+        const onLoggedOut = () => setIsAuthenticated(false);
+        window.addEventListener('deepet-admin-logged-out', onLoggedOut);
+        return () => window.removeEventListener('deepet-admin-logged-out', onLoggedOut);
     }, []);
 
     // Login Handler
@@ -172,9 +191,6 @@ export default function AdminDashboardPage() {
 
             if (data.success) {
                 setIsAuthenticated(true);
-                sessionStorage.setItem('deepet_admin_auth', 'true');
-                fetchLeads();
-                fetchSettings();
             } else {
                 setLoginError(data.error || 'Incorrect username or password');
             }
@@ -186,8 +202,12 @@ export default function AdminDashboardPage() {
     };
 
     // Logout Handler
-    const handleLogout = () => {
-        sessionStorage.removeItem('deepet_admin_auth');
+    const handleLogout = async () => {
+        await fetch('/api/admin/auth', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'logout' }),
+        }).catch(() => {});
         setIsAuthenticated(false);
         setLoginUser('');
         setLoginPass('');
@@ -198,6 +218,10 @@ export default function AdminDashboardPage() {
         setIsRefreshing(true);
         try {
             const res = await fetch('/api/admin/leads');
+            if (res.status === 401) {
+                setIsAuthenticated(false);
+                return;
+            }
             const data = await res.json();
             if (data.success) {
                 setLeads(data.leads || []);
@@ -465,7 +489,7 @@ export default function AdminDashboardPage() {
                             DeePets Admin
                         </h1>
                         <p className="text-xs text-slate-500 mt-1">
-                            Sign in to access leads and settings
+                            Sign in to manage leads, blogs, gallery and website info
                         </p>
                     </div>
 
@@ -524,6 +548,19 @@ export default function AdminDashboardPage() {
         );
     }
 
+    const tabs: { id: AdminTab; label: string }[] = [
+        { id: 'consultations', label: `Consultations (${stats.consultations})` },
+        { id: 'contacts', label: `Contacts (${stats.contacts})` },
+        { id: 'blogs', label: 'Blogs' },
+        { id: 'gallery', label: 'Gallery' },
+        { id: 'site', label: 'Website Info' },
+        { id: 'pages', label: 'Pages' },
+        { id: 'seo', label: 'SEO' },
+        { id: 'email', label: 'Email' },
+        { id: 'sheets', label: 'Google Sheet' },
+        { id: 'security', label: 'Password' },
+    ];
+
     // 3. Main Clean Admin Dashboard
     return (
         <div className="min-h-screen bg-slate-50 text-slate-900 font-sans antialiased text-sm">
@@ -541,63 +578,22 @@ export default function AdminDashboardPage() {
                             </span>
                         </div>
 
-                        {/* Minimalist Tabs */}
-                        <nav className="hidden md:flex items-center gap-1">
-                            <button
-                                type="button"
-                                onClick={() => setActiveTab('consultations')}
-                                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer ${
-                                    activeTab === 'consultations'
-                                        ? 'bg-slate-900 text-white'
-                                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-                                }`}
-                            >
-                                Consultations ({stats.consultations})
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => setActiveTab('contacts')}
-                                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer ${
-                                    activeTab === 'contacts'
-                                        ? 'bg-slate-900 text-white'
-                                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-                                }`}
-                            >
-                                Contacts ({stats.contacts})
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => setActiveTab('email')}
-                                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer ${
-                                    activeTab === 'email'
-                                        ? 'bg-slate-900 text-white'
-                                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-                                }`}
-                            >
-                                Email Settings
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => setActiveTab('sheets')}
-                                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer ${
-                                    activeTab === 'sheets'
-                                        ? 'bg-slate-900 text-white'
-                                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-                                }`}
-                            >
-                                Google Sheet
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => setActiveTab('security')}
-                                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer ${
-                                    activeTab === 'security'
-                                        ? 'bg-slate-900 text-white'
-                                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-                                }`}
-                            >
-                                Change Password
-                            </button>
+                        {/* Tabs */}
+                        <nav className="hidden lg:flex items-center gap-1">
+                            {tabs.map((t) => (
+                                <button
+                                    key={t.id}
+                                    type="button"
+                                    onClick={() => setActiveTab(t.id)}
+                                    className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer ${
+                                        activeTab === t.id
+                                            ? 'bg-slate-900 text-white'
+                                            : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                                    }`}
+                                >
+                                    {t.label}
+                                </button>
+                            ))}
                         </nav>
 
                         {/* Right Quick Actions */}
@@ -624,52 +620,19 @@ export default function AdminDashboardPage() {
                     </div>
 
                     {/* Mobile Horizontal Tabs */}
-                    <div className="flex md:hidden overflow-x-auto py-2 gap-1.5 border-t border-slate-100 scrollbar-none">
-                        <button
-                            type="button"
-                            onClick={() => setActiveTab('consultations')}
-                            className={`px-2.5 py-1 rounded text-xs font-medium whitespace-nowrap ${
-                                activeTab === 'consultations' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600'
-                            }`}
-                        >
-                            Consultations ({stats.consultations})
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => setActiveTab('contacts')}
-                            className={`px-2.5 py-1 rounded text-xs font-medium whitespace-nowrap ${
-                                activeTab === 'contacts' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600'
-                            }`}
-                        >
-                            Contacts
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => setActiveTab('email')}
-                            className={`px-2.5 py-1 rounded text-xs font-medium whitespace-nowrap ${
-                                activeTab === 'email' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600'
-                            }`}
-                        >
-                            Email
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => setActiveTab('sheets')}
-                            className={`px-2.5 py-1 rounded text-xs font-medium whitespace-nowrap ${
-                                activeTab === 'sheets' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600'
-                            }`}
-                        >
-                            Google Sheet
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => setActiveTab('security')}
-                            className={`px-2.5 py-1 rounded text-xs font-medium whitespace-nowrap ${
-                                activeTab === 'security' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600'
-                            }`}
-                        >
-                            Password
-                        </button>
+                    <div className="flex lg:hidden overflow-x-auto py-2 gap-1.5 border-t border-slate-100 scrollbar-none">
+                        {tabs.map((t) => (
+                            <button
+                                key={t.id}
+                                type="button"
+                                onClick={() => setActiveTab(t.id)}
+                                className={`px-2.5 py-1 rounded text-xs font-medium whitespace-nowrap ${
+                                    activeTab === t.id ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600'
+                                }`}
+                            >
+                                {t.label}
+                            </button>
+                        ))}
                     </div>
                 </div>
             </header>
@@ -1201,6 +1164,12 @@ export default function AdminDashboardPage() {
                         </form>
                     </div>
                 )}
+
+                {activeTab === 'blogs' && <BlogManager />}
+                {activeTab === 'gallery' && <GalleryManager />}
+                {activeTab === 'site' && <SiteSettingsForm />}
+                {activeTab === 'pages' && <PagesEditor />}
+                {activeTab === 'seo' && <SeoManager />}
 
             </main>
         </div>

@@ -6,7 +6,7 @@ import { LocationIntro } from "@/components/locations/LocationIntro";
 import { LocationOfferings } from "@/components/locations/LocationOfferings";
 import { LocationPromos } from "@/components/locations/LocationPromos";
 import { BookingSection } from "@/components/home/BookingSection";
-import { findPhone, getThemeOptions } from "@/lib/wp";
+import { findPhone, getThemeOptions } from "@/lib/cms";
 import { SeoHead } from "@/components/seo/SeoHead";
 
 export default async function GurgaonPage() {

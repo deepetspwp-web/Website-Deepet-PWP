@@ -21,8 +21,9 @@ const nextConfig: NextConfig = {
         hostname: 'randomuser.me',
       },
       {
+        // Blog, gallery and logo images uploaded to Firebase Storage.
         protocol: 'https',
-        hostname: 'api.deepetservices.com',
+        hostname: 'firebasestorage.googleapis.com',
       },
     ],
   },

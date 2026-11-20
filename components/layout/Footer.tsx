@@ -15,7 +15,7 @@ import {
     type LucideIcon,
 } from "lucide-react";
 import { useThemeOptions } from "@/components/providers/ThemeOptionsProvider";
-import { findPhone, whatsappHref } from "@/lib/wp/format";
+import { findPhone, whatsappHref } from "@/lib/cms/format";
 
 const SOCIAL_ICONS: Record<string, LucideIcon> = {
     facebook: Facebook,

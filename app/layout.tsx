@@ -6,7 +6,7 @@ import SmoothScrolling from "@/components/layout/SmoothScrolling";
 import { BackToTop } from "@/components/layout/BackToTop";
 import ReCaptchaProvider from "@/components/providers/ReCaptchaProvider";
 import { ThemeOptionsProvider } from "@/components/providers/ThemeOptionsProvider";
-import { getThemeOptions } from "@/lib/wp";
+import { getThemeOptions } from "@/lib/cms";
 
 const poppins = Poppins({
   variable: "--font-poppins",
@@ -26,10 +26,8 @@ const notoSerif = Noto_Serif({
 
 const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "https://deepetservices.com";
 
-// SEO meta (title/description/OG/Twitter/robots/canonical) is supplied by the
-// TeqzWP SEO plugin via <SeoHead> on pages that have WordPress content (home,
-// blog posts). Front-end-only pages keep their own per-page `metadata` export
-// (each already declares a complete title).
+// Per-page SEO comes from Admin → SEO (rendered by <SeoHead>); blog posts set
+// their own metadata from the fields in Admin → Blogs.
 export async function generateMetadata(): Promise<Metadata> {
   const theme = await getThemeOptions();
   const siteName = theme?.company.siteTitle || "DeePet Services";

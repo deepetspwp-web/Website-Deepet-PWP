@@ -1,7 +1,11 @@
 import { NextResponse } from 'next/server';
+import { requireAdmin } from '@/lib/adminAuth';
 import { getSettings, saveSettings } from '@/lib/leadsStore';
 
 export async function GET() {
+    const denied = await requireAdmin();
+    if (denied) return denied;
+
     try {
         const settings = await getSettings();
         return NextResponse.json({ success: true, settings });
@@ -12,6 +16,9 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
+    const denied = await requireAdmin();
+    if (denied) return denied;
+
     try {
         const body = await req.json();
         const updated = await saveSettings(body);

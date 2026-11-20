@@ -7,11 +7,11 @@
 //
 // Ported from visaguy.sa.cloudflare. DeePet is English-only and serves
 // non-trailing-slash URLs, so the Arabic localisation and trailing-slash
-// normalisation from the source are dropped — WP-supplied URLs are trusted
-// verbatim (the teqzwp-seo plugin already emits absolute public-host URLs).
+// normalisation from the source are dropped — URLs are built from siteUrl()
+// and trusted verbatim.
 
 import { siteUrl } from "./site";
-import type { SeoSitemapUrl } from "./wp";
+import type { SeoSitemapUrl } from "./cms/types";
 
 export type SitemapUrlEntry = {
   loc: string;
@@ -39,7 +39,7 @@ function escapeXml(value: string): string {
 function toIso(value: string | Date | null | undefined): string | null {
   if (!value) return null;
   if (value instanceof Date) return value.toISOString();
-  // Trust WP-provided strings — they're already ISO 8601. Re-parsing and
+  // Trust stored strings — they're already ISO 8601. Re-parsing and
   // re-formatting risks dropping the timezone offset some hosts send.
   return value;
 }
@@ -109,16 +109,15 @@ export function buildSitemapUrlsetXml(entries: SitemapUrlEntry[]): string {
 const ALLOWED_SITEMAP_PROTOCOLS = new Set(["http:", "https:"]);
 
 /**
- * Normalises a WP-supplied URL. The teqzwp-seo plugin emits fully-qualified
- * `https://` URLs on the public host already, so we validate the scheme and
- * pass the URL through verbatim. Bare-path inputs (no scheme) are anchored to
+ * Normalises a sitemap URL. Absolute `https://` URLs are validated and passed
+ * through verbatim. Bare-path inputs (no scheme) are anchored to
  * the configured public siteUrl.
  *
  * Any URL whose protocol isn't http(s) (e.g. `mailto:`, `tel:`, `data:`,
  * `javascript:`, `ftp:`) is rejected by returning the empty string, as are
  * inputs that don't parse at all. The caller filters empties out.
  */
-export function normaliseWpUrl(url: string): string {
+export function normaliseUrl(url: string): string {
   const trimmed = url.trim();
   try {
     const parsed = new URL(trimmed);
@@ -130,13 +129,12 @@ export function normaliseWpUrl(url: string): string {
 }
 
 /**
- * Convert one WP sitemap bucket's URLs into sitemap entries — every link comes
- * straight from the `teqzwpSeo.sitemapXml` query (no hard-coded statics),
+ * Convert one sitemap bucket's URLs into sitemap entries,
  * validated and anchored to the public host. Rejected entries are dropped.
  */
 export function bucketToEntries(urls: SeoSitemapUrl[] | null): SitemapUrlEntry[] {
   return (urls ?? [])
-    .map((u) => ({ loc: normaliseWpUrl(u.url), lastModified: u.lastModified }))
+    .map((u) => ({ loc: normaliseUrl(u.url), lastModified: u.lastModified }))
     .filter((entry) => entry.loc !== "");
 }
 

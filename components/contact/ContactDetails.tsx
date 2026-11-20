@@ -3,7 +3,7 @@
 import { motion } from "framer-motion";
 import { Phone, MapPin, Clock, Mail, ShieldCheck, MessageCircle, ArrowUpRight } from "lucide-react";
 import { useThemeOptions } from "@/components/providers/ThemeOptionsProvider";
-import { telHref, whatsappHref } from "@/lib/wp/format";
+import { telHref, whatsappHref } from "@/lib/cms/format";
 
 export function ContactDetails() {
     const theme = useThemeOptions();

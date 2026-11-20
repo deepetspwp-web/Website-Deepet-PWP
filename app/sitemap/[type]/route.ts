@@ -1,13 +1,7 @@
-// Dynamic per-type sub-sitemap, served at /sitemap/<type>.xml (e.g.
-// /sitemap/post.xml, /sitemap/page.xml). One handler covers every type the
-// teqzwp-seo plugin reports — no per-type route files — so it auto-adapts to
-// whatever is enabled in WP.
-//
-// Emits ONLY the URLs from the `teqzwpSeo.sitemapXml` (+ taxonomy) query for
-// the matching bucket, validated and anchored to the public host. No
-// hard-coded static or archive entries.
+// Child sitemap served at /sitemap/<type>.xml — "post" (blog posts) or
+// "page" (site pages not hidden in Admin → SEO).
 
-import { getAllSitemapBuckets } from "@/lib/wp";
+import { getAllSitemapBuckets } from "@/lib/cms";
 import {
   buildSitemapUrlsetXml,
   bucketToEntries,
