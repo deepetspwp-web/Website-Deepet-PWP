@@ -1,7 +1,7 @@
 "use client";
 
 import { useThemeOptions } from "@/components/providers/ThemeOptionsProvider";
-import { findPhone, telHref, whatsappHref } from "@/lib/wp/format";
+import { findPhone, telHref, whatsappHref } from "@/lib/cms/format";
 
 export function useContact() {
     const theme = useThemeOptions();

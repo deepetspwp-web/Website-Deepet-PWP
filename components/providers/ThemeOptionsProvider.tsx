@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useContext, type ReactNode } from "react";
-import type { ThemeOptions } from "@/lib/wp/types";
+import type { ThemeOptions } from "@/lib/cms/types";
 
 const ThemeOptionsContext = createContext<ThemeOptions | null>(null);
 

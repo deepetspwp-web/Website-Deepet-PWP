@@ -1,45 +1,65 @@
 import { NextResponse } from 'next/server';
-import { getSettings, saveSettings } from '@/lib/leadsStore';
+import { getSettings, getStoredSettings, saveCredentials } from '@/lib/leadsStore';
+import {
+    clearSession,
+    createSession,
+    getSession,
+    hashPassword,
+    verifyPassword,
+} from '@/lib/adminAuth';
+
+function storedHash(s: Awaited<ReturnType<typeof getStoredSettings>>) {
+    return s.adminPasswordHash || s.adminPassword || '1';
+}
+
+// GET: is the current browser signed in?
+export async function GET() {
+    const session = await getSession();
+    return NextResponse.json({ success: true, authenticated: !!session, username: session?.username ?? null });
+}
 
 export async function POST(req: Request) {
     try {
         const body = await req.json();
         const { action, username, password, currentPassword, newUsername, newPassword } = body;
-        const settings = await getSettings();
+        const settings = await getStoredSettings();
 
-        // Login check
         if (action === 'login') {
             const validUser = settings.adminUsername || '1';
-            const validPass = settings.adminPassword || '1';
-
-            if (username === validUser && password === validPass) {
+            if (username === validUser && verifyPassword(String(password ?? ''), storedHash(settings))) {
+                // Upgrade a legacy plaintext password to a hash on first login.
+                if (!settings.adminPasswordHash) {
+                    await saveCredentials(validUser, hashPassword(String(password)));
+                }
+                await createSession(validUser);
                 return NextResponse.json({ success: true, username: validUser });
             }
             return NextResponse.json({ success: false, error: 'Invalid username or password' }, { status: 401 });
         }
 
-        // Change password / credentials
-        if (action === 'change_credentials') {
-            const validPass = settings.adminPassword || '1';
+        if (action === 'logout') {
+            await clearSession();
+            return NextResponse.json({ success: true });
+        }
 
-            if (currentPassword !== validPass) {
+        if (action === 'change_credentials') {
+            if (!(await getSession())) {
+                return NextResponse.json({ success: false, error: 'Not signed in' }, { status: 401 });
+            }
+            if (!verifyPassword(String(currentPassword ?? ''), storedHash(settings))) {
                 return NextResponse.json({ success: false, error: 'Current password is incorrect' }, { status: 400 });
             }
-
-            if (!newPassword || newPassword.trim().length === 0) {
-                return NextResponse.json({ success: false, error: 'New password cannot be empty' }, { status: 400 });
+            if (!newPassword || String(newPassword).trim().length < 6) {
+                return NextResponse.json({ success: false, error: 'New password must be at least 6 characters' }, { status: 400 });
             }
-
-            const updatedUser = newUsername && newUsername.trim() ? newUsername.trim() : (settings.adminUsername || '1');
-            const updated = await saveSettings({
-                adminUsername: updatedUser,
-                adminPassword: newPassword.trim(),
-            });
-
+            const updatedUser = newUsername && String(newUsername).trim() ? String(newUsername).trim() : (settings.adminUsername || '1');
+            await saveCredentials(updatedUser, hashPassword(String(newPassword).trim()));
+            await createSession(updatedUser);
+            const fresh = await getSettings();
             return NextResponse.json({
                 success: true,
                 message: 'Admin credentials updated successfully!',
-                username: updated.adminUsername,
+                username: fresh.adminUsername,
             });
         }
 
@@ -49,4 +69,3 @@ export async function POST(req: Request) {
         return NextResponse.json({ success: false, error: 'Server error' }, { status: 500 });
     }
 }
-

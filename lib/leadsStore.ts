@@ -1,353 +1,226 @@
-import fs from 'fs/promises';
-import path from 'path';
-import { query, ensureTables } from './db';
+import "server-only";
+import fs from "fs/promises";
+import path from "path";
+import { FieldValue } from "firebase-admin/firestore";
+import { db, isFirebaseConfigured } from "./firebase/admin";
+import type { AdminSettings, Lead } from "./leadTypes";
 
-export interface Lead {
-    id: string;
-    code: string;
-    number: number;
-    type: 'consultation' | 'contact';
-    name: string;
-    phone: string;
-    email?: string;
-    petType?: string;
-    category?: string;
-    service?: string;
-    price?: string | number;
-    city?: string;
-    pincode?: string;
-    date?: string;
-    timeSlot?: string;
-    message?: string;
-    source: string;
-    status: 'Pending' | 'Completed' | 'Cancelled';
-    timestamp: string;
-    utm_source?: string;
-    utm_medium?: string;
-    utm_campaign?: string;
-}
+export type { AdminSettings, Lead } from "./leadTypes";
 
-export interface AdminSettings {
-    notificationRecipientEmail: string;
-    senderDisplayName: string;
-    senderEmail: string;
-    enableEmailNotifications: boolean;
-    googleScriptWebhookUrl: string;
+// Leads and admin settings live in Firestore:
+//   leads/{code}        one document per booking / contact enquiry
+//   counters/leads      { next: number } — sequential DEPWEB00<N> codes
+//   config/admin        notification settings + admin login (hashed password)
+// When Firebase isn't configured (local dev without keys) everything falls
+// back to JSON files in /data so the site still works.
+
+const DATA_DIR = path.join(process.cwd(), "data");
+const LEADS_FILE = path.join(DATA_DIR, "leads.json");
+const SETTINGS_FILE = path.join(DATA_DIR, "settings.json");
+
+type StoredSettings = AdminSettings & {
     adminUsername?: string;
-    adminPassword?: string;
-}
-
-const DATA_DIR = path.join(process.cwd(), 'data');
-const LEADS_FILE = path.join(DATA_DIR, 'leads.json');
-const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
-
-const DEFAULT_SETTINGS: AdminSettings = {
-    notificationRecipientEmail: 'deepetservices1@gmail.com',
-    senderDisplayName: 'DeePets Notifications',
-    senderEmail: 'contact@deepetservices.com',
-    enableEmailNotifications: true,
-    googleScriptWebhookUrl: '',
-    adminUsername: '1',
-    adminPassword: '1',
+    adminPassword?: string; // legacy plaintext, replaced by adminPasswordHash on next login
+    adminPasswordHash?: string;
 };
 
-// In-memory cache for settings so form submissions don't query DB
-let cachedSettings: AdminSettings | null = null;
+const DEFAULT_SETTINGS: StoredSettings = {
+    notificationRecipientEmail: "deepetservices1@gmail.com",
+    senderDisplayName: "DeePets Notifications",
+    senderEmail: "contact@deepetservices.com",
+    enableEmailNotifications: true,
+    googleScriptWebhookUrl: "",
+    adminUsername: "1",
+    adminPassword: "1",
+};
+
+let cachedSettings: StoredSettings | null = null;
 let settingsCacheTime = 0;
-const SETTINGS_CACHE_TTL = 30000; // 30 seconds
+const SETTINGS_CACHE_TTL = 30_000;
 
-// -------------------------------------------------------------
-// LOCAL FALLBACK HELPERS
-// -------------------------------------------------------------
-async function getLocalLeads(): Promise<Lead[]> {
+// ---------------------------------------------------------------- local fallback
+async function readJson<T>(file: string, fallback: T): Promise<T> {
     try {
-        const raw = await fs.readFile(LEADS_FILE, 'utf-8');
-        return JSON.parse(raw);
+        return JSON.parse(await fs.readFile(file, "utf-8")) as T;
     } catch {
-        return [];
+        return fallback;
     }
 }
 
-async function saveLocalLeads(leads: Lead[]): Promise<void> {
+async function writeJson(file: string, value: unknown) {
     try {
         await fs.mkdir(DATA_DIR, { recursive: true });
-        await fs.writeFile(LEADS_FILE, JSON.stringify(leads, null, 2), 'utf-8');
+        await fs.writeFile(file, JSON.stringify(value, null, 2), "utf-8");
     } catch {
-        // ignore
+        // read-only filesystem (e.g. serverless) — ignore
     }
 }
 
-async function getLocalSettings(): Promise<AdminSettings> {
-    try {
-        const raw = await fs.readFile(SETTINGS_FILE, 'utf-8');
-        return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
-    } catch {
-        return DEFAULT_SETTINGS;
-    }
+function nowTimestamp(): string {
+    return new Date().toLocaleString("en-IN", {
+        timeZone: "Asia/Kolkata",
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+    });
 }
 
-async function saveLocalSettings(settings: AdminSettings): Promise<void> {
-    try {
-        await fs.mkdir(DATA_DIR, { recursive: true });
-        await fs.writeFile(SETTINGS_FILE, JSON.stringify(settings, null, 2), 'utf-8');
-    } catch {
-        // ignore
-    }
+function toLead(data: FirebaseFirestore.DocumentData): Lead {
+    const { createdAt: _createdAt, ...rest } = data;
+    return rest as Lead;
 }
 
-// -------------------------------------------------------------
-// MAIN DATABASE EXPORTS (NEON POSTGRESQL)
-// -------------------------------------------------------------
-
+// ---------------------------------------------------------------- leads
 export async function getLeads(): Promise<Lead[]> {
-    try {
-        await ensureTables();
-        const res = await query(`
-            SELECT 
-                id, code, number, type, name, phone, email,
-                pet_type as "petType", category, service, price, city, pincode,
-                date, time_slot as "timeSlot", message, source, status,
-                timestamp, utm_source, utm_medium, utm_campaign
-            FROM leads
-            ORDER BY number DESC
-        `);
-        return res.rows;
-    } catch (dbErr) {
-        console.error('Neon DB read error, using local fallback:', dbErr);
-        return getLocalLeads();
-    }
+    if (!isFirebaseConfigured()) return readJson<Lead[]>(LEADS_FILE, []);
+    const snap = await db().collection("leads").orderBy("number", "desc").get();
+    return snap.docs.map((d) => toLead(d.data()));
 }
 
 export async function addLead(
-    newLeadData: Omit<Lead, 'id' | 'code' | 'number' | 'timestamp' | 'status'> & { status?: Lead['status'] }
+    newLeadData: Omit<Lead, "id" | "code" | "number" | "timestamp" | "status"> & {
+        status?: Lead["status"];
+    },
 ): Promise<Lead> {
-    const now = new Date();
-    const formattedTimestamp = now.toLocaleString('en-IN', {
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: false,
-    });
-    const status = newLeadData.status || 'Pending';
+    const status = newLeadData.status || "Pending";
+    const timestamp = nowTimestamp();
 
-    // Fast Single-Query Insert: calculates next sequential number and inserts in 1 round trip
-    try {
-        await ensureTables();
-
-        const insertQuery = `
-            WITH next_seq AS (
-                SELECT COALESCE(MAX(number), 0) + 1 AS num FROM leads
-            )
-            INSERT INTO leads (
-                id, code, number, type, name, phone, email, pet_type, category, service,
-                price, city, pincode, date, time_slot, message, source, status, timestamp,
-                utm_source, utm_medium, utm_campaign
-            )
-            SELECT 
-                'DEPWEB00' || num,
-                'DEPWEB00' || num,
-                num,
-                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-                $11, $12, $13, $14, $15, $16, $17, $18, $19
-            FROM next_seq
-            RETURNING id, code, number, timestamp;
-        `;
-
-        const res = await query(insertQuery, [
-            newLeadData.type,
-            newLeadData.name,
-            newLeadData.phone,
-            newLeadData.email || '',
-            newLeadData.petType || 'Dog',
-            newLeadData.category || '',
-            newLeadData.service || '',
-            String(newLeadData.price || '0'),
-            newLeadData.city || '',
-            newLeadData.pincode || '',
-            newLeadData.date || '',
-            newLeadData.timeSlot || '',
-            newLeadData.message || '',
-            newLeadData.source || 'Website Form',
-            status,
-            formattedTimestamp,
-            newLeadData.utm_source || '',
-            newLeadData.utm_medium || '',
-            newLeadData.utm_campaign || '',
-        ]);
-
-        const row = res.rows[0];
-        const lead: Lead = {
-            id: row?.id || `DEPWEB001`,
-            code: row?.code || `DEPWEB001`,
-            number: row?.number || 1,
-            status,
-            timestamp: formattedTimestamp,
-            ...newLeadData,
-        };
-
-        // Asynchronous background backup to local disk
-        getLocalLeads().then((localList) => {
-            localList.unshift(lead);
-            saveLocalLeads(localList);
-        }).catch(() => {});
-
+    if (!isFirebaseConfigured()) {
+        const list = await readJson<Lead[]>(LEADS_FILE, []);
+        const number = list.reduce((m, l) => Math.max(m, l.number || 0), 0) + 1;
+        const code = `DEPWEB00${number}`;
+        const lead: Lead = { ...newLeadData, id: code, code, number, status, timestamp };
+        list.unshift(lead);
+        await writeJson(LEADS_FILE, list);
         return lead;
-    } catch (dbErr) {
-        console.error('Neon DB insert error, using local fallback:', dbErr);
-        const localList = await getLocalLeads();
-        const maxNumber = localList.reduce((max, l) => Math.max(max, l.number || 0), 0);
-        const nextNumber = maxNumber > 0 ? maxNumber + 1 : 1;
-        const code = `DEPWEB00${nextNumber}`;
+    }
 
+    const firestore = db();
+    const counterRef = firestore.collection("counters").doc("leads");
+
+    // One transaction: bump the counter and create the lead with that number,
+    // so two simultaneous bookings can never get the same code.
+    return firestore.runTransaction(async (tx) => {
+        const counter = await tx.get(counterRef);
+        const number = ((counter.data()?.next as number | undefined) ?? 0) + 1;
+        const code = `DEPWEB00${number}`;
         const lead: Lead = {
+            ...newLeadData,
+            petType: newLeadData.petType || "Dog",
+            price: String(newLeadData.price ?? "0"),
+            source: newLeadData.source || "Website Form",
             id: code,
             code,
-            number: nextNumber,
+            number,
             status,
-            timestamp: formattedTimestamp,
-            ...newLeadData,
+            timestamp,
         };
-        localList.unshift(lead);
-        await saveLocalLeads(localList);
+        tx.set(counterRef, { next: number }, { merge: true });
+        tx.set(firestore.collection("leads").doc(code), {
+            ...lead,
+            createdAt: FieldValue.serverTimestamp(),
+        });
         return lead;
-    }
+    });
 }
 
-export async function updateLeadStatus(id: string, status: Lead['status']): Promise<Lead | null> {
-    try {
-        await ensureTables();
-        const res = await query(
-            `
-            UPDATE leads
-            SET status = $1
-            WHERE id = $2 OR code = $2
-            RETURNING 
-                id, code, number, type, name, phone, email,
-                pet_type as "petType", category, service, price, city, pincode,
-                date, time_slot as "timeSlot", message, source, status,
-                timestamp, utm_source, utm_medium, utm_campaign
-            `,
-            [status, id]
-        );
-
-        if (res.rows.length > 0) {
-            return res.rows[0];
-        }
-    } catch (err) {
-        console.error('Neon DB status update error:', err);
+export async function updateLeadStatus(id: string, status: Lead["status"]): Promise<Lead | null> {
+    if (!isFirebaseConfigured()) {
+        const list = await readJson<Lead[]>(LEADS_FILE, []);
+        const lead = list.find((l) => l.id === id || l.code === id);
+        if (!lead) return null;
+        lead.status = status;
+        await writeJson(LEADS_FILE, list);
+        return lead;
     }
-
-    const localList = await getLocalLeads();
-    const idx = localList.findIndex((l) => l.id === id || l.code === id);
-    if (idx !== -1) {
-        localList[idx].status = status;
-        await saveLocalLeads(localList);
-        return localList[idx];
-    }
-    return null;
+    const ref = db().collection("leads").doc(id);
+    const snap = await ref.get();
+    if (!snap.exists) return null;
+    await ref.update({ status });
+    return { ...toLead(snap.data()!), status };
 }
 
 export async function deleteLead(id: string): Promise<boolean> {
-    try {
-        await ensureTables();
-        const res = await query(`DELETE FROM leads WHERE id = $1 OR code = $1`, [id]);
-        return (res.rowCount || 0) > 0;
-    } catch (err) {
-        console.error('Neon DB delete error:', err);
+    if (!isFirebaseConfigured()) {
+        const list = await readJson<Lead[]>(LEADS_FILE, []);
+        const filtered = list.filter((l) => l.id !== id && l.code !== id);
+        await writeJson(LEADS_FILE, filtered);
+        return filtered.length !== list.length;
     }
-
-    const localList = await getLocalLeads();
-    const filtered = localList.filter((l) => l.id !== id && l.code !== id);
-    if (filtered.length !== localList.length) {
-        await saveLocalLeads(filtered);
-        return true;
-    }
-    return false;
+    const ref = db().collection("leads").doc(id);
+    if (!(await ref.get()).exists) return false;
+    await ref.delete();
+    return true;
 }
 
-export async function getSettings(): Promise<AdminSettings> {
-    // Fast in-memory cache check (0ms response)
+// ---------------------------------------------------------------- settings
+/** Full settings including login fields — server use only. */
+export async function getStoredSettings(): Promise<StoredSettings> {
     if (cachedSettings && Date.now() - settingsCacheTime < SETTINGS_CACHE_TTL) {
         return cachedSettings;
     }
-
-    try {
-        await ensureTables();
-        const res = await query(`
-            SELECT 
-                notification_recipient_email as "notificationRecipientEmail",
-                sender_display_name as "senderDisplayName",
-                sender_email as "senderEmail",
-                enable_email_notifications as "enableEmailNotifications",
-                google_script_webhook_url as "googleScriptWebhookUrl",
-                admin_username as "adminUsername",
-                admin_password as "adminPassword"
-            FROM admin_settings
-            WHERE id = 'default'
-        `);
-
-        if (res.rows.length > 0) {
-            const fresh = { ...DEFAULT_SETTINGS, ...res.rows[0] };
-            cachedSettings = fresh;
-            settingsCacheTime = Date.now();
-            return fresh;
-        }
-    } catch (err) {
-        console.error('Neon DB getSettings error:', err);
+    let fresh: StoredSettings;
+    if (!isFirebaseConfigured()) {
+        fresh = { ...DEFAULT_SETTINGS, ...(await readJson(SETTINGS_FILE, {})) };
+    } else {
+        const snap = await db().collection("config").doc("admin").get();
+        fresh = { ...DEFAULT_SETTINGS, ...(snap.data() as Partial<StoredSettings> | undefined) };
     }
-
-    const fallback = await getLocalSettings();
-    cachedSettings = fallback;
+    cachedSettings = fresh;
     settingsCacheTime = Date.now();
-    return fallback;
+    return fresh;
 }
 
-export async function saveSettings(newSettings: Partial<AdminSettings>): Promise<AdminSettings> {
-    const current = await getSettings();
-    const updated: AdminSettings = { ...current, ...newSettings };
+/** Settings safe to send to the browser (no password fields). */
+export async function getSettings(): Promise<AdminSettings & { adminUsername: string }> {
+    const s = await getStoredSettings();
+    return {
+        notificationRecipientEmail: s.notificationRecipientEmail,
+        senderDisplayName: s.senderDisplayName,
+        senderEmail: s.senderEmail,
+        enableEmailNotifications: s.enableEmailNotifications,
+        googleScriptWebhookUrl: s.googleScriptWebhookUrl,
+        adminUsername: s.adminUsername || "1",
+    };
+}
 
-    // Update memory cache immediately
+const EDITABLE_KEYS: (keyof AdminSettings)[] = [
+    "notificationRecipientEmail",
+    "senderDisplayName",
+    "senderEmail",
+    "enableEmailNotifications",
+    "googleScriptWebhookUrl",
+];
+
+/** Saves notification settings. Login fields are ignored here — see saveCredentials. */
+export async function saveSettings(input: Partial<AdminSettings>) {
+    const patch: Partial<AdminSettings> = {};
+    for (const key of EDITABLE_KEYS) {
+        if (input[key] !== undefined) (patch as Record<string, unknown>)[key] = input[key];
+    }
+    await writeStored(patch);
+    return getSettings();
+}
+
+export async function saveCredentials(username: string, passwordHash: string) {
+    await writeStored({ adminUsername: username, adminPasswordHash: passwordHash, adminPassword: "" });
+}
+
+async function writeStored(patch: Partial<StoredSettings>) {
+    const current = await getStoredSettings();
+    const updated = { ...current, ...patch };
+    if (!isFirebaseConfigured()) {
+        await writeJson(SETTINGS_FILE, updated);
+    } else {
+        await db().collection("config").doc("admin").set(
+            { ...patch, updatedAt: FieldValue.serverTimestamp() },
+            { merge: true },
+        );
+    }
     cachedSettings = updated;
     settingsCacheTime = Date.now();
-
-    try {
-        await ensureTables();
-        await query(
-            `
-            INSERT INTO admin_settings (
-                id, notification_recipient_email, sender_display_name, sender_email,
-                enable_email_notifications, google_script_webhook_url, admin_username, admin_password,
-                updated_at
-            ) VALUES (
-                'default', $1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP
-            )
-            ON CONFLICT (id) DO UPDATE SET
-                notification_recipient_email = EXCLUDED.notification_recipient_email,
-                sender_display_name = EXCLUDED.sender_display_name,
-                sender_email = EXCLUDED.sender_email,
-                enable_email_notifications = EXCLUDED.enable_email_notifications,
-                google_script_webhook_url = EXCLUDED.google_script_webhook_url,
-                admin_username = EXCLUDED.admin_username,
-                admin_password = EXCLUDED.admin_password,
-                updated_at = CURRENT_TIMESTAMP
-            `,
-            [
-                updated.notificationRecipientEmail,
-                updated.senderDisplayName,
-                updated.senderEmail,
-                updated.enableEmailNotifications,
-                updated.googleScriptWebhookUrl,
-                updated.adminUsername || '1',
-                updated.adminPassword || '1',
-            ]
-        );
-    } catch (err) {
-        console.error('Neon DB saveSettings error:', err);
-    }
-
-    await saveLocalSettings(updated);
-    return updated;
 }

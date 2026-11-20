@@ -1,8 +1,12 @@
 import { NextResponse } from 'next/server';
+import { requireAdmin } from '@/lib/adminAuth';
 import { getSettings } from '@/lib/leadsStore';
 import { sendEmailWithMailjet } from '@/lib/mailjet';
 
 export async function POST() {
+    const denied = await requireAdmin();
+    if (denied) return denied;
+
     try {
         const settings = await getSettings();
         const recipient = settings.notificationRecipientEmail || 'deepetservices1@gmail.com';

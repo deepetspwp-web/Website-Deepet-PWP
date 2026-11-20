@@ -1,7 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { Calendar, User, ArrowRight } from "lucide-react";
-import type { WPPostListItem } from "@/lib/wp/types";
+import type { PostListItem } from "@/lib/cms/types";
 
 function formatDate(dateString: string): string {
     try {
@@ -19,7 +19,7 @@ function stripHtml(html: string): string {
     return html.replace(/<[^>]*>/g, "").trim();
 }
 
-export function PostCard({ post }: { post: WPPostListItem }) {
+export function PostCard({ post }: { post: PostListItem }) {
     const image = post.featuredImage?.node;
     const category = post.categories?.nodes?.[0];
     const authorName = post.author?.node?.name;

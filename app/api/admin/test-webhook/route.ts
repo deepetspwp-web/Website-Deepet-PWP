@@ -1,7 +1,11 @@
 import { NextResponse } from 'next/server';
+import { requireAdmin } from '@/lib/adminAuth';
 import { getSettings } from '@/lib/leadsStore';
 
 export async function POST(req: Request) {
+    const denied = await requireAdmin();
+    if (denied) return denied;
+
     try {
         const body = await req.json().catch(() => ({}));
         const settings = await getSettings();

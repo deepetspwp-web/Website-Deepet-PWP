@@ -3,7 +3,7 @@
 import { Phone } from "lucide-react";
 import { motion } from "framer-motion";
 import { useThemeOptions } from "@/components/providers/ThemeOptionsProvider";
-import { findPhone, telHref, whatsappHref } from "@/lib/wp/format";
+import { findPhone, telHref, whatsappHref } from "@/lib/cms/format";
 import { WhatsAppIcon } from "@/components/ui/WhatsAppIcon";
 
 export function MobileStickyCTA() {

@@ -2,7 +2,7 @@ import { Navbar } from "@/components/layout/Navbar";
 import { Footer } from "@/components/layout/Footer";
 import { MobileStickyCTA } from "@/components/layout/MobileStickyCTA";
 import { InstagramGallery } from "@/components/gallery/InstagramGallery";
-import { getGalleryImages } from "@/lib/wp";
+import { getGalleryImages } from "@/lib/cms";
 import { SeoHead } from "@/components/seo/SeoHead";
 
 export default async function GalleryPage() {

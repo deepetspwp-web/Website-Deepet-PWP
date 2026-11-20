@@ -1,7 +1,11 @@
 import { NextResponse } from 'next/server';
+import { requireAdmin } from '@/lib/adminAuth';
 import { getLeads, updateLeadStatus, deleteLead, addLead } from '@/lib/leadsStore';
 
 export async function GET(req: Request) {
+    const denied = await requireAdmin();
+    if (denied) return denied;
+
     try {
         const { searchParams } = new URL(req.url);
         const type = searchParams.get('type') || 'all'; // 'consultation' | 'contact' | 'all'
@@ -54,6 +58,9 @@ export async function GET(req: Request) {
 }
 
 export async function PATCH(req: Request) {
+    const denied = await requireAdmin();
+    if (denied) return denied;
+
     try {
         const body = await req.json();
         const { id, status } = body;
@@ -75,6 +82,9 @@ export async function PATCH(req: Request) {
 }
 
 export async function DELETE(req: Request) {
+    const denied = await requireAdmin();
+    if (denied) return denied;
+
     try {
         const { searchParams } = new URL(req.url);
         const id = searchParams.get('id');

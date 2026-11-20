@@ -6,13 +6,14 @@ import type { Metadata } from "next";
 import { Navbar } from "@/components/layout/Navbar";
 import { Footer } from "@/components/layout/Footer";
 import { MobileStickyCTA } from "@/components/layout/MobileStickyCTA";
-import { getLocalPostBySlug, getLocalPostSlugs } from "@/lib/blog";
-import { SeoHead } from "@/components/seo/SeoHead";
+import { getPostBySlug, getPostSlugs } from "@/lib/cms";
 
 type Params = { slug: string };
 
-export function generateStaticParams(): Params[] {
-    return getLocalPostSlugs().map((slug) => ({ slug }));
+export const revalidate = 600;
+
+export async function generateStaticParams(): Promise<Params[]> {
+    return (await getPostSlugs()).map((slug) => ({ slug }));
 }
 
 function formatDate(dateString: string): string {
@@ -33,20 +34,48 @@ export async function generateMetadata({
     params: Promise<Params>;
 }): Promise<Metadata> {
     const { slug } = await params;
-    const post = getLocalPostBySlug(slug);
+    const post = await getPostBySlug(slug);
     if (!post) return { title: "Post Not Found" };
-    // SeoHead below still pulls SEO from WordPress; these stored values are
-    // the fallback when WordPress can't be reached.
-    if (post.seo?.title || post.seo?.description) {
-        return {
-            title: post.seo?.title || post.title,
-            description: post.seo?.description || undefined,
-        };
-    }
-
-    // SEO (title/description/OG/canonical) is supplied by the TeqzWP SEO plugin
-    // via <SeoHead> rendered in the page body.
-    return {};
+    // SEO title/description are edited per post in the admin panel.
+    const title = post.seo?.title || post.title;
+    const description =
+        post.seo?.description ||
+        post.excerpt.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim().slice(0, 160) ||
+        undefined;
+    const image = post.featuredImage?.node;
+    const authorName = post.author?.node?.name || "DeePet";
+    return {
+        title,
+        description,
+        alternates: { canonical: `/blog/${slug}` },
+        robots: {
+            index: true,
+            follow: true,
+            googleBot: { "max-snippet": -1, "max-image-preview": "large", "max-video-preview": -1 },
+        },
+        openGraph: {
+            type: "article",
+            title,
+            description,
+            url: `/blog/${slug}`,
+            siteName: "DeePet Services",
+            locale: "en_IN",
+            publishedTime: post.date,
+            modifiedTime: post.modified,
+            authors: [authorName],
+            section: post.categories?.nodes?.[0]?.name,
+            tags: post.tags?.nodes?.map((t) => t.name),
+            images: image?.mediaItemUrl
+                ? [{ url: image.mediaItemUrl, alt: image.altText || title }]
+                : undefined,
+        },
+        twitter: {
+            card: "summary_large_image",
+            title,
+            description,
+            images: image?.mediaItemUrl ? [image.mediaItemUrl] : undefined,
+        },
+    };
 }
 
 export default async function BlogPostPage({
@@ -55,7 +84,7 @@ export default async function BlogPostPage({
     params: Promise<Params>;
 }) {
     const { slug } = await params;
-    const post = getLocalPostBySlug(slug);
+    const post = await getPostBySlug(slug);
 
     if (!post) notFound();
 
@@ -66,7 +95,6 @@ export default async function BlogPostPage({
 
     return (
         <main className="min-h-screen">
-            <SeoHead uri={`blog/${slug}`} />
             <Navbar />
 
             <article className="py-20 bg-white">
@@ -120,7 +148,7 @@ export default async function BlogPostPage({
                     )}
 
                     <div
-                        className="wp-content"
+                        className="post-content"
                         dangerouslySetInnerHTML={{ __html: post.content }}
                     />
 

@@ -1,4 +1,4 @@
-import { getLlmsTxt } from "@/lib/wp";
+import { getLlmsTxt } from "@/lib/cms";
 
 export const revalidate = 600;
 
