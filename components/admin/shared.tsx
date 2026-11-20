@@ -45,12 +45,42 @@ export async function adminFetch<T = Record<string, unknown>>(url: string, init?
         throw new Error('Your session expired. Please sign in again.');
     }
     if (!res.ok || data.success === false) {
+        if (res.status === 413) throw new Error('Too large to save (over 4.5 MB). Use smaller images, or remove pasted images and upload them with the Image button.');
         throw new Error(data.error || `Request failed (${res.status})`);
     }
     return data as T;
 }
 
-export async function uploadImage(file: File, folder: 'blog' | 'gallery' | 'site') {
+/**
+ * Shrinks large photos in the browser before upload: max 1920px wide, saved as
+ * WebP. Keeps uploads well under Vercel's 4.5 MB request limit and makes the
+ * website load faster. Small images, GIFs, SVGs and icons are left untouched.
+ */
+async function prepareImage(file: File): Promise<File> {
+    const resizable = /^image\/(jpeg|png|webp|avif)$/.test(file.type);
+    if (!resizable || file.size < 500 * 1024) return file;
+    try {
+        const bitmap = await createImageBitmap(file);
+        const scale = Math.min(1, 1920 / bitmap.width);
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(bitmap.width * scale);
+        canvas.height = Math.round(bitmap.height * scale);
+        canvas.getContext('2d')!.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+        bitmap.close();
+        const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/webp', 0.85));
+        if (!blob || blob.size >= file.size) return file;
+        const name = file.name.replace(/\.[a-z0-9]+$/i, '') + '.webp';
+        return new File([blob], name, { type: 'image/webp' });
+    } catch {
+        return file;
+    }
+}
+
+export async function uploadImage(original: File, folder: 'blog' | 'gallery' | 'site') {
+    const file = await prepareImage(original);
+    if (file.size > 4 * 1024 * 1024) {
+        throw new Error('This image is too large (over 4 MB even after compressing). Please use a smaller image.');
+    }
     const form = new FormData();
     form.append('file', file);
     form.append('folder', folder);
