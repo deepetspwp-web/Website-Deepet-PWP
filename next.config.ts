@@ -57,6 +57,15 @@ const nextConfig: NextConfig = {
           { key: "content-type", value: "application/xslt+xml; charset=utf-8" },
         ],
       },
+      {
+        // Testimonial videos and posters never change under the same name, so
+        // let browsers and Vercel's CDN keep them for a year instead of
+        // re-downloading them on every visit. Rename the file to replace one.
+        source: "/videos/:path*",
+        headers: [
+          { key: "cache-control", value: "public, max-age=31536000, immutable" },
+        ],
+      },
     ];
   },
 };

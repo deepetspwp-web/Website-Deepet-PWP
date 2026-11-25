@@ -8,22 +8,20 @@ import { motion, AnimatePresence } from "framer-motion";
 interface VideoStory {
     id: number;
     src: string;
+    poster: string;
     title: string;
     pet: string;
     location: string;
     rating: number;
 }
 
+// Compressed (~3-7 MB each). Cards show only the poster image; a video file
+// is downloaded only when a visitor taps a card, to keep bandwidth low.
 const VIDEO_TESTIMONIALS: VideoStory[] = [
-    { id: 1, src: "/videos/IMG_1834.mp4", title: "Home Vet Visit & Routine Checkup", pet: "Dog Care", location: "Gurgaon", rating: 4.9 },
-    { id: 2, src: "/videos/IMG_1844.MP4", title: "Friendly Vet at Our Home", pet: "Furry Friend", location: "Faridabad", rating: 4.8 },
-    { id: 3, src: "/videos/IMG_1845.MP4", title: "Puppy Health & Vitals Care", pet: "Puppy Care", location: "Gurgaon", rating: 4.9 },
-    { id: 4, src: "/videos/IMG_1847.MP4", title: "Professional Veterinary Service", pet: "Happy Dog", location: "Noida", rating: 4.7 },
-    { id: 5, src: "/videos/IMG_1848.MP4", title: "Safe & Relaxed Home Visit", pet: "Dog Care", location: "Delhi", rating: 4.8 },
-    { id: 6, src: "/videos/IMG_1851.MP4", title: "At-Home Vaccination & Advice", pet: "Pet Care", location: "South Delhi", rating: 4.8 },
-    { id: 7, src: "/videos/IMG_1856.MP4", title: "Comfortable Home Checkup", pet: "Furry Friend", location: "Gurgaon", rating: 4.8 },
-    { id: 8, src: "/videos/IMG_1857.MP4", title: "Trusted Home Vet Experience", pet: "Dog Care", location: "Delhi", rating: 4.9 },
-    { id: 9, src: "/videos/IMG_1861.MP4", title: "Happy Pet, Relieved Parent", pet: "Pet Parent", location: "Delhi NCR", rating: 4.9 },
+    { id: 1, src: "/videos/img_1834.mp4", poster: "/videos/img_1834.jpg", title: "Home Vet Visit & Routine Checkup", pet: "Dog Care", location: "Gurgaon", rating: 4.9 },
+    { id: 2, src: "/videos/img_1844.mp4", poster: "/videos/img_1844.jpg", title: "Friendly Vet at Our Home", pet: "Furry Friend", location: "Faridabad", rating: 4.8 },
+    { id: 3, src: "/videos/img_1847.mp4", poster: "/videos/img_1847.jpg", title: "Professional Veterinary Service", pet: "Happy Dog", location: "Noida", rating: 4.7 },
+    { id: 4, src: "/videos/img_1848.mp4", poster: "/videos/img_1848.jpg", title: "Safe & Relaxed Home Visit", pet: "Dog Care", location: "Delhi", rating: 4.8 },
 ];
 
 export function Testimonials() {
@@ -141,18 +139,12 @@ export function Testimonials() {
                             className="shrink-0 w-[155px] sm:w-[180px] md:w-[195px] aspect-[9/16] rounded-2xl overflow-hidden relative shadow-md hover:shadow-2xl transition-all duration-300 hover:-translate-y-1.5 snap-center cursor-pointer group bg-slate-900 border border-slate-200/80"
                         >
                             {/* Native Video Element for 9:16 Preview */}
-                            <video
-                                src={`${story.src}#t=0.5`}
-                                preload="metadata"
-                                playsInline
-                                muted
-                                onMouseEnter={(e) => {
-                                    e.currentTarget.play().catch(() => {});
-                                }}
-                                onMouseLeave={(e) => {
-                                    e.currentTarget.pause();
-                                    e.currentTarget.currentTime = 0.5;
-                                }}
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                                src={story.poster}
+                                alt={story.title}
+                                loading="lazy"
+                                decoding="async"
                                 className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                             />
 
@@ -227,6 +219,8 @@ export function Testimonials() {
                             <video
                                 ref={modalVideoRef}
                                 src={VIDEO_TESTIMONIALS[activeVideoIndex].src}
+                                poster={VIDEO_TESTIMONIALS[activeVideoIndex].poster}
+                                preload="auto"
                                 autoPlay
                                 playsInline
                                 controls
